@@ -68,6 +68,7 @@ if [ "$1" = "-install" ]; then
 		mkdir $id 2>/dev/null
 		cp $fn $sf
 	fi
+	chmod 755 $sf
 
 	if [ ! -f $cf ]; then
 		cat <<EOF > $cf
@@ -108,7 +109,7 @@ EOF
 
 	echo "Knock.sh installed"
 	echo "Please update the configuration file" $cf
-	echo "Once updated, start knock.sh run with this command:" $sn "-start"
+	echo "Once updated, start knock.sh run with this command:" $sf "-start"
 	exit
 fi
 
