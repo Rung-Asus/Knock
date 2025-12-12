@@ -14,3 +14,19 @@ Port Number \<space> Interface(s) [comma separated] \<space> Command to execute 
 Finally run the following command: 
 
       /jffs/addons/knock.sh -start
+
+Users can now execute commands by sending port knocks
+
+(e.g. for main lan interface command, enter browser url: http://192.168.50.1:44444)
+
+To update configuration run:
+        /jffs/addons/knock/knock.sh -stop'
+        
+Then update /jffs/addons/knock/knock.cfg
+
+Finally run:
+        /jffs/addons/knock/knock.sh -start
+
+To uninstall run:
+        /jffs/addons/knock/knock.sh -uninstall
+
