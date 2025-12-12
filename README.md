@@ -13,4 +13,4 @@ Port Number <space> Interface(s) [comma separated] <space> Command to execute [t
           
 Finally run the following command: 
 
-      /jffs/addons/knock.sh -start'
+      /jffs/addons/knock.sh -start
