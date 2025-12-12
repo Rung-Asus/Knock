@@ -9,7 +9,7 @@ Next update knock.cfg configuration file in the /jffs/addons/knock/ folder
 
 Format of file is:
 
-Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]
+Port Number \<space> Interface(s) [comma separated] \<space> Command to execute [to end of line]
           
 Finally run the following command: 
 
