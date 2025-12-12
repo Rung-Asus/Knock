@@ -1,0 +1,235 @@
+#!/bin/sh
+REV="1.0"
+
+INTERVAL=5
+
+fn=$(readlink -f "$0")
+
+jf="/jffs"
+id=$jf"/addons/knock"
+
+sf=$id"/knock.sh"
+cf=$id"/knock.cfg"
+
+pm=$jf"/scripts/post-mount"
+fs=$jf"/scripts/firewall-start"
+
+if [ "$1" = "-screen" ]; then
+	if [ ! -f "/opt/sbin/screen" ]; then
+		logger -t "knock.sh" "Error: Entware Screen app not installed"
+		exit
+	fi
+	if [ ! -f $sf ]; then
+		logger -t "knock.sh" "Error: knock.sh not installed yet"
+		exit
+	fi
+
+	logger -t "knock.sh" "Starting knock.sh background process"
+
+	/opt/sbin/screen -S knock -X quit > /dev/null
+	/opt/sbin/screen -dmS knock "$sf" -loop
+	exit
+fi
+
+if [ "$1" = "-firewall" ]; then
+	if [ ! -f $cf ]; then
+		logger -t "knock.sh" "Error: Missing configuration file" $cf
+		exit
+	fi
+
+	logger -t "knock.sh" "Adding knock ports to iptables"
+
+	while read port interfaces cmd
+	do
+		if [ -n "$port" ] && [ $(echo $port | cut -c 1-1) != "#" ]; then
+			for interface in $(echo $interfaces | tr ',' ' '); do
+				iptables -D INPUT -i $interface -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info 2> /dev/null
+				iptables -I INPUT -i $interface -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info
+			done
+		fi
+	done < $cf
+
+	exit
+fi
+
+if [ "$1" = "-install" ]; then
+
+	if [ ! -f "/opt/sbin/screen" ]; then
+		echo "Please install Entware Screep app first"
+		echo "Run this command: 'opkg install screen'"
+		exit
+	fi
+
+	if [ "$fn" != "$sf" ]; then
+		if [ ! -d $jf"/addons" ]; then
+			echo "Error: This script is designed for Asuswrt-Merlin firmware only"
+			exit
+		fi
+		mkdir $id 2>/dev/null
+		cp $fn $sf
+	fi
+
+	if [ ! -f $cf ]; then
+		cat <<EOF > $cf
+#knock.sh example configuration file
+
+#Format Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]
+
+#Wake up PC if 44444 knock comes from main lan, tailscale (lo), or wireguard server (wgs1)
+44444 br0,lo,wgs1 ether-wake -i br0 xx:xx:xx:xx:xx:xx
+
+#Reboot router if 44445 knock comes from main lan, tailscale (lo), or wireguard server (wgs1)
+44445 br0,lo,wgs1 service reboot
+
+#enable script example
+44446 br0 /jffs/scripts/enable-example.sh
+
+#disable script example
+44447 br0 /jffs/scripts/disable-example.sh
+
+EOF
+	fi
+
+	if ! [ -f $pm ]; then
+		echo "#!/bin/sh" > $pm
+      		echo "" >> $pm
+		chmod 755 $pm
+	fi
+	sed -i -e '/knock.sh/d' $pm
+	echo "(sleep 30 &&" $sf "-screen) & # Added by knock.sh" >> $pm
+
+	if ! [ -f $fs ]; then
+		echo "#!/bin/sh" > $fs
+      		echo "" >> $fs
+		chmod 755 $fs
+	fi
+	sed -i -e '/knock.sh/d' $fs
+	echo $sf "-firewall # Added by knock.sh" >> $fs
+
+	echo "Knock.sh installed"
+	echo "Please update the configuration file" $cf
+	echo "Once updated, start knock.sh run with this command:" $sn "-start"
+	exit
+fi
+
+if [ "$1" = "-start" ] || [ "$1" = "-restart" ]; then
+	if [ ! -f $sf ]; then
+		echo "Error: knock.sh not installed yet.  Run './knock.sh -install'"
+		exit
+	fi
+	if [ ! -f $cf ]; then
+		echo "Error: Missing configuration file" $cf
+		exit
+	fi
+
+	service restart_firewall
+
+	$sf "-screen"
+
+	echo "Ready for port knocks"
+	echo "The following ports/interfaces will execute these router commands:"
+
+	while read port interfaces cmd
+	do
+		if [ -n "$port" ] && [ $(echo $port | cut -c 1-1) != "#" ]; then
+			echo "	Port" $port "on" $interfaces "Command:" "$cmd"
+		fi
+	done < $cf
+
+	exit
+fi
+
+if [ "$1" = "-stop" ]; then
+	screen -S knock -X quit > /dev/null
+	echo "knock.sh stopped"
+	exit
+fi
+
+if [ "$1" = "-uninstall" ]; then
+	screen -S knock -X quit > /dev/null
+	sed -i -e '/knock.sh/d' $pm
+	sed -i -e '/knock.sh/d' $fs
+	service restart_firewall
+
+	rm $sf
+	cp $cf /tmp/knock.cfg
+	rm $cf
+
+	if [ $(pwd) = $id ]; then 
+		echo "Error: cannot remove install directory" $id
+	else
+		rmdir $id 2>/dev/null
+	fi
+
+	echo "Knock.sh uninstalled"
+	echo "Existing configuration file saved as /tmp/knock.cfg"
+	exit
+fi
+
+if [ "$1" != "-loop" ]; then
+	echo "Knock.sh: Router Commands for non-admin users"
+	echo "Revision" $REV
+	echo ""
+	echo "To Install:"
+	echo "	1) Run './knock.sh -install'"
+	echo "	2) Update knock.cfg configuration file in the" $id"/ folder"
+        echo "		Format of file is:"
+        echo "		Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]"
+	echo "	3) Run '"$sf "-start'"
+	echo ""
+	echo "Users can now execute commands by sending port knocks"
+	echo "	(e.g. for main lan interface command, enter browser url: http://192.168.50.1:44444)"
+	echo ""
+	echo "To update configuration:"
+	echo "	Run '"$sf "-stop'"
+	echo "	Update" $cf
+	echo "	Run '"$sf "-start'"
+	echo ""
+	echo "To Uninstall:"
+	echo "	Run '"$sf "-uninstall'"
+	echo ""
+	exit
+fi
+
+if [ ! -f $cf ]; then
+	echo "Error: Missing configuration file" $cf
+	logger -t "knock.sh" "Error: Missing configuration file" $cf
+	exit
+fi
+
+function readDATA {
+	dmesg | grep "knock.sh" | tail -n 1 | awk '{print $11 " " $15 " " $2}'; }
+function readID {
+	echo $DATA | awk '{print $1}' | awk -F '=' '{print $2}'; }
+
+DATA=$(readDATA)
+oldID=$(readID)
+
+echo "Waiting for port knocks..."
+logger -t "knock.sh" "Waiting for port knocks..."
+while sleep $INTERVAL;do
+	DATA=$(readDATA)
+	ID=$(readID)
+	if [ "$ID" != "$oldID" ]; then
+		KPORT=$(echo $DATA | awk '{print $2}' | awk -F '=' '{print $2}')
+		KINT=$(echo $DATA | awk '{print $3}' | awk -F '=' '{print $2}')
+		echo  "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID
+		logger -t "knock.sh" "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID
+
+		while read port interfaces cmd
+		do
+			if [ -n "$port" ] && [ $(echo $port | cut -c 1-1) != "#" ]; then
+				if [ "$KPORT" = "$port" ]; then
+					echo "Executing command:" "$cmd"
+					logger -t "knock.sh" "Executing command:" "$cmd"
+					$cmd &
+				fi
+			fi
+		done < $cf
+
+		sleep $INTERVAL
+		sleep $INTERVAL
+		DATA=$(readDATA)
+		oldID=$(readID)
+	fi
+done
