@@ -1,7 +1,8 @@
 # Knock
 Knock: Router Commands for non-admin users
 
-To install, ssh into your router and enter the following command:
+## To install
+ssh into your router and enter the following command:
 
       curl -L -s -k -O https://raw.githubusercontent.com/Rung-Asus/Knock/refs/heads/main/knock.sh && sh knock.sh -install
 
@@ -19,8 +20,8 @@ Users can now execute commands by sending port knocks
 
 (e.g. for main lan interface command, enter browser url: http://192.168.50.1:44444)
 
-To update configuration run:
-
+## To Update Configuration
+Run:
       /jffs/addons/knock/knock.sh -stop
         
 Then update '/jffs/addons/knock/knock.cfg'
@@ -28,6 +29,7 @@ Then update '/jffs/addons/knock/knock.cfg'
 Finally run:
       /jffs/addons/knock/knock.sh -start
 
-To uninstall run:
+## To Uninstall
+run:
       /jffs/addons/knock/knock.sh -uninstall
 
