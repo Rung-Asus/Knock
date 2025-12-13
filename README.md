@@ -22,14 +22,17 @@ Users can now execute commands by sending port knocks
 
 ## To Update Configuration
 Run:
+
       /jffs/addons/knock/knock.sh -stop
         
 Then update '/jffs/addons/knock/knock.cfg'
 
 Finally run:
+
       /jffs/addons/knock/knock.sh -start
 
 ## To Uninstall
 run:
+
       /jffs/addons/knock/knock.sh -uninstall
 
