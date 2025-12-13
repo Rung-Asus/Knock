@@ -1,16 +1,38 @@
 #!/bin/sh
-REV="1.0"
+#
+#Knock.sh: Router Commands for non-admin users
+#
+#To Install:
+#        1) Run './knock.sh -install'
+#        2) Update knock.cfg configuration file in the /jffs/addons/knock/ folder
+#                Format of file is:
+#                Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]
+#        3) Run '/jffs/addons/knock/knock.sh -start'
+#
+#Users can now execute commands by sending port knocks
+#        (e.g. for main lan interface command, enter browser url: http://192.168.50.1:44444)
+#
+#To update configuration:
+#        Run '/jffs/addons/knock/knock.sh -stop'
+#        Update /jffs/addons/knock/knock.cfg
+#        Run '/jffs/addons/knock/knock.sh -start'
+#
+#To Uninstall:
+#        Run '/jffs/addons/knock/knock.sh -uninstall'
+#
+#Many thanks to @Viktor Jaep for all his help, input and testing of this script!
+#Concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
+#Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
+# Last Updated: 13DEC2025
 
+REV="1.0"
 INTERVAL=5
 
 fn=$(readlink -f "$0")
-
 jf="/jffs"
 id=$jf"/addons/knock"
-
 sf=$id"/knock.sh"
 cf=$id"/knock.cfg"
-
 pm=$jf"/scripts/post-mount"
 fs=$jf"/scripts/firewall-start"
 
@@ -123,7 +145,7 @@ if [ "$1" = "-start" ] || [ "$1" = "-restart" ]; then
 		exit
 	fi
 
-	service restart_firewall
+	service restart_firewall >/dev/null
 
 	$sf "-screen"
 
@@ -166,6 +188,46 @@ if [ "$1" = "-uninstall" ]; then
 	echo "Existing configuration file saved as /tmp/knock.cfg"
 	exit
 fi
+
+if [ "$1" = "-update" ]; then
+	#Tailmon.sh function
+	function promptyn {
+		while true; do
+			read -p "$1" -n 1 -r yn
+			case "${yn}" in
+				[Yy]* ) return 0 ;;
+				[Nn]* ) return 1 ;;
+				* ) echo -e "\nPlease answer y or n.";;
+			esac
+		done }
+
+	vf=$id"/version.txt"
+	rm $vf 2> /dev/null
+	curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail "https://raw.githubusercontent.com/Rung-Asus/Knock/refs/heads/main/version.txt" -o $vf
+	if [ -f $vf ]; then
+		nv=$(cat $vf | head -n 1)
+		echo "Latest version:" $nv
+		echo "Current version:" $REV
+		if  promptyn "Proceed with update? (y/n):" ; then
+			echo -e "\nDownloading..."
+			curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail "https://raw.githubusercontent.com/Rung-Asus/Knock/refs/heads/main/knock.sh" -o $sf
+			chmod 755 $sf
+			echo "Installing..."
+			$sf -install >/dev/null
+			echo "Restarting..."
+			$sf -start >/dev/null
+			echo "Update completed."
+			echo "Installed version is now:"
+			$sf -version
+		else
+			echo -e "\nNo update performed"
+		fi
+	else
+		echo "Error: network issue"
+	fi
+	exit
+fi
+
 
 if [ "$1" != "-loop" ]; then
 	echo "Knock.sh: Router Commands for non-admin users"
