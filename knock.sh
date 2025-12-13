@@ -36,6 +36,11 @@ cf=$id"/knock.cfg"
 pm=$jf"/scripts/post-mount"
 fs=$jf"/scripts/firewall-start"
 
+if [ "$1" = "-version" ]; then
+	echo "Version" $REV
+	exit
+fi
+
 if [ "$1" = "-screen" ]; then
 	if [ ! -f "/opt/sbin/screen" ]; then
 		logger -t "knock.sh" "Error: Entware Screen app not installed"
