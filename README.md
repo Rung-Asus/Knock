@@ -4,12 +4,13 @@ Knock: Router Commands for non-admin users
 ## To install
 ssh into your router and enter the following command:
 
-      curl -L -s -k -O https://raw.githubusercontent.com/Rung-Asus/Knock/refs/heads/main/knock.sh && sh knock.sh -install
-
-Next update knock.cfg configuration file in the /jffs/addons/knock/ folder:
+      curl --retry 3 "https://raw.githubusercontent.com/Rung-Asus/Knock/refs/heads/main/knock.sh" -o /jffs/scripts/knock.sh && chmod 755 /jffs/scripts/knock.sh && sh /jffs/scripts/knock.sh -install
 
 
-      nano /jffs/addons/knock/knock.cfg
+Next update knock.cfg configuration file in the /jffs/addons/knock.d/ folder:
+
+
+      nano /jffs/addons/knock.d/knock.cfg
 
 Format of file is:
 
@@ -17,7 +18,7 @@ Port Number \<space> Interface(s) [comma separated] \<space> Command to execute 
           
 Finally run the following command: 
 
-      /jffs/addons/knock/knock.sh -start
+      /jffs/scripts/knock.sh -start
 
 Users can now execute commands by sending port knocks
 
@@ -26,18 +27,18 @@ Users can now execute commands by sending port knocks
 ## To Update Configuration
 Run:
 
-      /jffs/addons/knock/knock.sh -stop
+      /jffs/scripts/knock.sh -stop
         
-Then update '/jffs/addons/knock/knock.cfg'
+Then update '/jffs/addons/knock.d/knock.cfg'
 
 Finally run:
 
-      /jffs/addons/knock/knock.sh -start
+      /jffs/scripts/knock.sh -start
 
 ## To Uninstall
 run:
 
-      /jffs/addons/knock/knock.sh -uninstall
+      /jffs/scripts/knock.sh -uninstall
 
 ## Acknowledgments
 Many thanks to @Viktor Jaep for all his help, input and testing of this script!
