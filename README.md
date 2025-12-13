@@ -36,3 +36,9 @@ run:
 
       /jffs/addons/knock/knock.sh -uninstall
 
+## Acknowledgments
+Many thanks to @Viktor Jaep for all his help, input and testing of this script!
+
+Portions in this script were derved from @Viktor Jaep's awesome Tailmon script
+
+Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
