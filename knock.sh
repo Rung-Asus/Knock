@@ -273,6 +273,7 @@ function readID {
 DATA=$(readDATA)
 oldID=$(readID)
 
+
 echo "Knock.sh started"
 echo "Version" $REV
 echo "Waiting for port knocks..."
