@@ -3,22 +3,26 @@
 #Knock.sh: Router Commands for non-admin users
 #
 #To Install:
-#        1) Run './knock.sh -install'
-#        2) Update knock.cfg configuration file in the /jffs/addons/knock/ folder
+#        1) Move script to /jffs/scripts/ directory
+#        2) Run 'sh /jffs/scripts/knock.sh -install'
+#        3) Update knock.cfg configuration file in the /jffs/addons/knock.d/ folder
 #                Format of file is:
 #                Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]
-#        3) Run '/jffs/addons/knock/knock.sh -start'
+#                Default configuration file has use-case examples:
+#                        Wake PC, reboot router, and run custom enable/disable scripts (e.g. for VPN Director rules)
+#        3) Run '/jffs/scripts/knock.sh -start'
 #
 #Users can now execute commands by sending port knocks
 #        (e.g. for main lan interface command, enter browser url: http://192.168.50.1:44444)
 #
 #To update configuration:
-#        Run '/jffs/addons/knock/knock.sh -stop'
-#        Update /jffs/addons/knock/knock.cfg
-#        Run '/jffs/addons/knock/knock.sh -start'
+#        Run '/jffs/scripts/knock.sh -stop'
+#        Update /jffs/addons/knock.d/knock.cfg
+#        Run '/jffs/scripts/knock.sh -start'
 #
 #To Uninstall:
-#        Run '/jffs/addons/knock/knock.sh -uninstall'
+#        Run '/jffs/scripts/knock.sh -uninstall'
+#
 #
 #Many thanks to @Viktor Jaep for all his help, input and testing of this script!
 #Concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
@@ -30,11 +34,13 @@ INTERVAL=5
 
 fn=$(readlink -f "$0")
 jf="/jffs"
-id=$jf"/addons/knock"
-sf=$id"/knock.sh"
+id=$jf"/addons/knock.d"
 cf=$id"/knock.cfg"
-pm=$jf"/scripts/post-mount"
-fs=$jf"/scripts/firewall-start"
+vf=$id"/version.txt"
+js=$jf"/scripts"
+sf=$js"/knock.sh"
+pm=$js"/post-mount"
+fs=$js"/firewall-start"
 
 if [ "$1" = "-version" ]; then
 	echo "Version" $REV
@@ -80,6 +86,11 @@ if [ "$1" = "-firewall" ]; then
 fi
 
 if [ "$1" = "-install" ]; then
+	if [ "$fn" != "$sf" ]; then
+		echo "Error: This script must be run from" $js
+		exit
+	fi
+	chmod 755 $sf
 
 	if [ ! -f "/opt/sbin/screen" ]; then
 		echo "Please install Entware Screep app first"
@@ -87,15 +98,11 @@ if [ "$1" = "-install" ]; then
 		exit
 	fi
 
-	if [ "$fn" != "$sf" ]; then
-		if [ ! -d $jf"/addons" ]; then
-			echo "Error: This script is designed for Asuswrt-Merlin firmware only"
-			exit
-		fi
-		mkdir $id 2>/dev/null
-		cp $fn $sf
+	if [ ! -d $jf"/addons" ]; then
+		echo "Error: This script is designed for Asuswrt-Merlin firmware only"
+		exit
 	fi
-	chmod 755 $sf
+	mkdir $id 2>/dev/null
 
 	if [ ! -f $cf ]; then
 		cat <<EOF > $cf
@@ -136,15 +143,13 @@ EOF
 
 	echo "Knock.sh installed"
 	echo "Please update the configuration file" $cf
+	echo "Default configuration file has use-case examples:"
+	echo -e "\tWake PC, reboot router, run custom enable/disable scripts (e.g. for VPN Director rules)"
 	echo "Once updated, start knock.sh run with this command:" $sf "-start"
 	exit
 fi
 
 if [ "$1" = "-start" ] || [ "$1" = "-restart" ]; then
-	if [ ! -f $sf ]; then
-		echo "Error: knock.sh not installed yet.  Run './knock.sh -install'"
-		exit
-	fi
 	if [ ! -f $cf ]; then
 		echo "Error: Missing configuration file" $cf
 		exit
@@ -177,13 +182,14 @@ if [ "$1" = "-uninstall" ]; then
 	screen -S knock -X quit > /dev/null
 	sed -i -e '/knock.sh/d' $pm
 	sed -i -e '/knock.sh/d' $fs
-	service restart_firewall
+	service restart_firewall >/dev/null
 
 	rm $sf
 	cp $cf /tmp/knock.cfg
 	rm $cf
+	rm $vf 2> /dev/null
 
-	if [ $(pwd) = $id ]; then 
+	if [ $(pwd) = $id ]; then
 		echo "Error: cannot remove install directory" $id
 	else
 		rmdir $id 2>/dev/null
@@ -206,7 +212,6 @@ if [ "$1" = "-update" ]; then
 			esac
 		done }
 
-	vf=$id"/version.txt"
 	rm $vf 2> /dev/null
 	curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail "https://raw.githubusercontent.com/Rung-Asus/Knock/refs/heads/main/version.txt" -o $vf
 	if [ -f $vf ]; then
@@ -239,10 +244,13 @@ if [ "$1" != "-loop" ]; then
 	echo "Revision" $REV
 	echo ""
 	echo "To Install:"
-	echo "	1) Run './knock.sh -install'"
-	echo "	2) Update knock.cfg configuration file in the" $id"/ folder"
+	echo -e "\t1) Move script to" $js"/ directory"
+	echo "	2) Run 'sh" $sf "-install'"
+	echo "	3) Update knock.cfg configuration file in the" $id"/ folder"
         echo "		Format of file is:"
         echo "		Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]"
+	echo -e "\t\tDefault configuration file has use-case examples:"
+	echo -e "\t\t\tWake PC, reboot router, and run custom enable/disable scripts (e.g. for VPN Director rules)"
 	echo "	3) Run '"$sf "-start'"
 	echo ""
 	echo "Users can now execute commands by sending port knocks"
