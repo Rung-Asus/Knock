@@ -141,10 +141,14 @@ EOF
 	sed -i -e '/knock.sh/d' $fs
 	echo $sf "-firewall # Added by knock.sh" >> $fs
 
+	clear
 	echo "Knock.sh installed"
+	echo ""
 	echo "Please update the configuration file" $cf
+	echo ""
 	echo "Default configuration file has use-case examples:"
 	echo -e "\tWake PC, reboot router, run custom enable/disable scripts (e.g. for VPN Director rules)"
+	echo ""
 	echo "Once updated, start knock.sh run with this command:" $sf "-start"
 	exit
 fi
@@ -159,7 +163,9 @@ if [ "$1" = "-start" ] || [ "$1" = "-restart" ]; then
 
 	$sf "-screen"
 
-	echo "Ready for port knocks"
+	clear
+	echo "Knock.sh started and ready for port knocks"
+	echo ""
 	echo "The following ports/interfaces will execute these router commands:"
 
 	while read port interfaces cmd
