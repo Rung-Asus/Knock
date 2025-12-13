@@ -114,7 +114,7 @@ if [ "$1" = "-install" ]; then
 44444 br0,lo,wgs1 ether-wake -i br0 xx:xx:xx:xx:xx:xx
 
 #Reboot router if 44445 knock comes from main lan, tailscale (lo), or wireguard server (wgs1)
-44445 br0,lo,wgs1 service reboot
+44445 br0,lo,wgs1 reboot
 
 #enable script example
 44446 br0 /jffs/scripts/enable-example.sh
