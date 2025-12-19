@@ -27,9 +27,9 @@
 #Many thanks to @Viktor Jaep for all his help, input and testing of this script!
 #Concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
-# Last Updated: 13DEC2025
+# Last Updated: 18DEC2025
 
-REV="1.0"
+REV="1.0b"
 INTERVAL=5
 
 fn=$(readlink -f "$0")
@@ -41,6 +41,7 @@ js=$jf"/scripts"
 sf=$js"/knock.sh"
 pm=$js"/post-mount"
 fs=$js"/firewall-start"
+giturl="https://raw.githubusercontent.com/Rung-Asus/Knock/main"
 
 if [ "$1" = "-version" ]; then
 	echo "Version" $REV
@@ -219,14 +220,16 @@ if [ "$1" = "-update" ]; then
 		done }
 
 	rm $vf 2> /dev/null
-	curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail "https://raw.githubusercontent.com/Rung-Asus/Knock/refs/heads/main/version.txt" -o $vf
+	#curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail "https://raw.githubusercontent.com/Rung-Asus/Knock/refs/heads/main/version.txt" -o $vf
+	curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/version.txt" -o $vf
 	if [ -f $vf ]; then
 		nv=$(cat $vf | head -n 1)
 		echo "Latest version:" $nv
 		echo "Current version:" $REV
 		if  promptyn "Proceed with update? (y/n):" ; then
 			echo -e "\nDownloading..."
-			curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail "https://raw.githubusercontent.com/Rung-Asus/Knock/refs/heads/main/knock.sh" -o $sf
+			#curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail "https://raw.githubusercontent.com/Rung-Asus/Knock/refs/heads/main/knock.sh" -o $sf
+			curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/knock.sh" -o $sf
 			chmod 755 $sf
 			echo "Installing..."
 			$sf -install >/dev/null
