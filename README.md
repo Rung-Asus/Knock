@@ -4,7 +4,7 @@ Knock: Router Commands for non-admin users
 ## To install
 ssh into your router and enter the following command:
 
-      curl --retry 3 "https://raw.githubusercontent.com/Rung-Asus/Knock/refs/heads/main/knock.sh" -o /jffs/scripts/knock.sh && chmod 755 /jffs/scripts/knock.sh && sh /jffs/scripts/knock.sh -install
+      curl --retry 3 "https://raw.githubusercontent.com/Rung-Asus/Knock/main/knock.sh" -o /jffs/scripts/knock.sh && chmod 755 /jffs/scripts/knock.sh && sh /jffs/scripts/knock.sh -install
 
 
 Next update knock.cfg configuration file in the /jffs/addons/knock.d/ folder:
