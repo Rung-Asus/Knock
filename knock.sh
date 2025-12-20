@@ -197,6 +197,9 @@ if [ "$1" = "-start" ] || [ "$1" = "-restart" ]; then
 		echo ""
 		showconfig
 		exit
+	else
+		echo "Error: Cannot start knock in background"
+		exit 1
 	fi
 fi
 
