@@ -32,10 +32,11 @@
 #Many thanks to @Viktor Jaep for all his help, input and testing of this script!
 #Concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
-# Last Updated: 20DEC2025
+# Last Updated: 31DEC2025
 
-REV="1.1"
+REV="1.2"
 INTERVAL=5
+DOUBLE_KNOCK_WAIT=30
 
 fn=$(readlink -f "$0")
 jf="/jffs"
@@ -52,20 +53,25 @@ function showconfig {
 	echo -e "The following ports/interfaces will execute these router commands:\n"
 	lastcomment=""
 	commandnum=0
-	while read port interfaces cmd
+	while read ports interfaces cmd
 	do
-		if [ -n "$port" ]; then
-			if [ $(echo $port | cut -c 1-1) != "#" ]; then
+		if [ -n "$ports" ]; then
+			if [ $(echo $ports | cut -c 1-1) != "#" ]; then
 				commandnum=$(($commandnum+1))
 				echo "Command #" $commandnum
 				echo -e "\t"$lastcomment
-				echo -e "\tPort" $port "on" $interfaces
+				echo -e "\tPort(s)" $ports "on" $interfaces
 				echo -e "\tCommand:" "$cmd"
 				interface=$(echo $interfaces | awk -F',' '{print $1}')
-				echo -e "\tURL to initiate command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port
+				port1=$(echo $ports | awk -F',' '{print $1}')
+				echo -e "\tURL to initiate command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port1
+				port2=$(echo $ports | awk -F',' '{print $2}')
+				if [ -n "$port2" ]; then
+					echo -e "\t\tWait" $(( $INTERVAL * 3 )) "seconds then URL to complete command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port2
+				fi
 				echo -e ""
 			else
-				lastcomment=$(echo "$port $interfaces $cmd" | cut -c 2-)
+				lastcomment=$(echo "$ports $interfaces $cmd" | cut -c 2-)
 			fi
 		fi
 	done < $cf
@@ -101,12 +107,19 @@ if [ "$1" = "-firewall" ]; then
 
 	logger -t "knock.sh" "Adding knock ports to iptables"
 
-	while read port interfaces cmd
+	while read ports interfaces cmd
 	do
-		if [ -n "$port" ] && [ $(echo $port | cut -c 1-1) != "#" ]; then
-			for interface in $(echo $interfaces | tr ',' ' '); do
-				iptables -D INPUT -i $interface -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info 2> /dev/null
-				iptables -I INPUT -i $interface -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info
+		if [ -n "$ports" ] && [ $(echo $ports | cut -c 1-1) != "#" ]; then
+			COUNT=0
+			for port in $(echo $ports | tr ',' ' '); do
+				COUNT=$(($COUNT+1))
+				if [ $COUNT -gt 2 ]; then
+					break
+				fi
+				for interface in $(echo $interfaces | tr ',' ' '); do
+					iptables -D INPUT -i $interface -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info 2> /dev/null
+					iptables -I INPUT -i $interface -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info
+				done
 			done
 		fi
 	done < $cf
@@ -151,6 +164,8 @@ if [ "$1" = "-install" ]; then
 #Turn off vpn client
 44447 br0 /jffs/scripts/disable-wireguard-rule.sh
 
+#Sensitive command. Only execute command after a knock from two different ports (15 seconds apart)
+44449,44410 br0 /jffs/scripts/doubleknock.sh
 
 EOF
 	fi
@@ -344,13 +359,33 @@ while sleep $INTERVAL;do
 		echo  "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID
 		logger -t "knock.sh" "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID
 
-		while read port interfaces cmd
+		while read ports interfaces cmd
 		do
-			if [ -n "$port" ] && [ $(echo $port | cut -c 1-1) != "#" ]; then
+			if [ -n "$ports" ] && [ $(echo $ports | cut -c 1-1) != "#" ]; then
+				port1=$(echo $ports | awk -F',' '{print $1}')
+				port2=$(echo $ports | awk -F',' '{print $2}')
+				if [ -n "$port2" ]; then
+					if [ "$KPORT" = "$port1" ]; then
+						echo "Starting port" $port1 "timer"
+						logger -t "knock.sh" "Starting port" $port1 "timer"
+						/opt/sbin/screen -S knock_$port1 -X quit > /dev/null
+						/opt/sbin/screen -dmS knock_$port1 sleep $DOUBLE_KNOCK_WAIT
+						break
+					fi
+					if [ -n "$(ps -w | grep [k]nock_"$port1")" ]; then
+						echo "Port" $port1 "timer running"
+						logger -t "knock.sh" "Port" $port1 "timer running"
+						port=$port2
+					else
+						break
+					fi
+				else
+					port=$port1
+				fi
 				if [ "$KPORT" = "$port" ]; then
 					echo "Executing command:" "$cmd"
 					logger -t "knock.sh" "Executing command:" "$cmd"
-					$cmd &
+					sh -c "eval $cmd &"
 				fi
 			fi
 		done < $cf
