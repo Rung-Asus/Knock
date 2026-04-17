@@ -32,9 +32,9 @@
 #Many thanks to @Viktor Jaep for all his help, input and testing of this script!
 #Concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
-# Last Updated: 31DEC2025
+# Last Updated: 17APR2026
 
-REV="1.2"
+REV="1.3"
 INTERVAL=5
 DOUBLE_KNOCK_WAIT=30
 
@@ -48,6 +48,13 @@ sf=$js"/knock.sh"
 pm=$js"/post-mount"
 fs=$js"/firewall-start"
 giturl="https://raw.githubusercontent.com/Rung-Asus/Knock/main"
+
+#Fixes for new version of Screen
+# credit to Tailmon and Martinski W.
+unset LD_LIBRARY_PATH
+[ "$HOME" != "/root" ] && export HOME="/root"
+export SCREENDIR="${HOME}/.screen"
+
 
 function showconfig {
 	echo -e "The following ports/interfaces will execute these router commands:\n"
