@@ -32,9 +32,9 @@
 #Many thanks to @Viktor Jaep for all his help, input and testing of this script!
 #Concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
-# Last Updated: 17APR2026
+# Last Updated: 23APR2026
 
-REV="1.3"
+REV="1.3b"
 INTERVAL=5
 DOUBLE_KNOCK_WAIT=30
 
