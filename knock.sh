@@ -34,7 +34,7 @@
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
 # Last Updated: 23APR2026
 
-REV="1.3b"
+REV="1.4b"
 INTERVAL=5
 DOUBLE_KNOCK_WAIT=30
 
@@ -48,6 +48,8 @@ sf=$js"/knock.sh"
 pm=$js"/post-mount"
 fs=$js"/firewall-start"
 giturl="https://raw.githubusercontent.com/Rung-Asus/Knock/main"
+giturld="https://raw.githubusercontent.com/Rung-Asus/Knock/develop"
+df=$id/"develop"
 
 #Fixes for new version of Screen
 # credit to Tailmon and Martinski W.
@@ -251,6 +253,7 @@ if [ "$1" = "-uninstall" ]; then
 	cp $cf /tmp/knock.cfg
 	rm $cf
 	rm $vf 2> /dev/null
+	rm $df 2> /dev/null #Remove develop flag
 
 	if [ $(pwd) = $id ]; then
 		echo "Error: cannot remove install directory" $id
@@ -260,6 +263,16 @@ if [ "$1" = "-uninstall" ]; then
 
 	echo "Knock.sh uninstalled"
 	echo "Existing configuration file saved as /tmp/knock.cfg"
+	exit
+fi
+
+if [ "$1" = "-develop" ]; then
+        touch $df
+	exit
+fi
+
+if [ "$1" = "-main" ]; then
+        rm $df 2> /dev/null
 	exit
 fi
 
@@ -274,6 +287,11 @@ if [ "$1" = "-update" ]; then
 				* ) echo -e "\nPlease answer y or n.";;
 			esac
 		done }
+
+	if [ -f $df ]; then
+                echo "On develop branch."
+                giturl=$giturld
+        fi
 
 	rm $vf 2> /dev/null
 	curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/version.txt" -o $vf
