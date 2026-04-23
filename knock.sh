@@ -34,7 +34,7 @@
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
 # Last Updated: 23APR2026
 
-REV="1.4b"
+REV="1.4"
 INTERVAL=5
 DOUBLE_KNOCK_WAIT=30
 
