@@ -489,10 +489,8 @@ if [ "$1" = "-install" ]; then
 	#Check screen, optionally install
 	echo -ne "\tChecking for Screen utility..."
 	if [ ! -f "/opt/sbin/screen" ]; then
-		if [ "$2" != "" ]; then
-			exit 1
-		fi
 
+		echo ""
 		echo -e "\nKnock.sh requires the Entware utility 'screen'"
 
 		if  promptyn "Proceed with installing 'screen'? (y/n):" ; then
@@ -507,6 +505,7 @@ if [ "$1" = "-install" ]; then
 			echo "Cancelling install"
 			exit 1
 		fi
+		echo -ne "\tScreen successfully installed."
 	fi
 	echo -e $cm
 
@@ -1047,7 +1046,7 @@ if [ "$1" = "" ]; then
 
 		 [1])
 			sh $sf -install -force
-			$sf -stop -nobanner
+			$sf -stop -nobanner > /dev/null
 
 			if checkinstall ; then
 				if [ -f $tf ]; then
