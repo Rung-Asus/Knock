@@ -57,7 +57,7 @@
 # - Added an SSH UI with install, configure, and uninstall functions (and more). "e" = Exit
 # - Moved "REV" to "version" variable to be compatible with amtm
 
-version=2.0b
+version=2.0b1
 REV=$version
 
 INTERVAL=5
@@ -77,6 +77,7 @@ pa=$jf"/configs/profile.add"
 giturl="https://raw.githubusercontent.com/Rung-Asus/Knock/main"
 giturld="https://raw.githubusercontent.com/Rung-Asus/Knock/develop"
 df=$id/"develop"
+cm="\xE2\x9C\x94"
 
 #Fixes for new version of Screen
 # credit to Tailmon and Martinski W.
@@ -425,7 +426,7 @@ if [ "$1" = "-screen" ]; then
 
 	/opt/sbin/screen -S knock -X quit > /dev/null
 	/opt/sbin/screen -dmS knock "$sf" -loop
-	sleep 2  #wait for any aborts
+	sleep 4  #wait for any aborts
 	runstatus && exit 0 || exit 1
 fi
 
@@ -458,8 +459,6 @@ if [ "$1" = "-firewall" ]; then
 fi
 
 if [ "$1" = "-install" ]; then
-
-	cm="\xE2\x9C\x94"
 
 	if [ "$2" = "" ]; then
 		clear
@@ -696,6 +695,33 @@ fi
 if [ "$1" = "-main" ]; then
         rm $df 2> /dev/null
 	exit
+fi
+
+if [ "$1" = "amtmupdate" ]; then
+	if [ "$2" = "check" ]; then
+		exit 0
+	fi
+
+	if [ -f $df ]; then
+		giturl=$giturld
+	fi
+
+	echo -n "Running amtmupdate..."
+	rm $vf 2> /dev/null
+	curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/version.txt" -o $vf
+	if [ -f $vf ]; then
+		curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/knock.sh" -o $sf
+		$sf -install -force > /dev/null
+		$sf -start -nobanner > /dev/null
+		echo -e $cm
+		echo "amtmupdate completed."
+		exit 0
+	else
+		echo ""
+		echo "amtmupdate failed."
+		exit 1
+	fi
+
 fi
 
 function updatecommand {
