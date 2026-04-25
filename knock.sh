@@ -1034,7 +1034,7 @@ if [ "$1" = "" ]; then
 			echo "4. Start/restart knock.sh background process"
 			echo "5. Stop knock.sh background process"
 			echo "6. Edit knock.sh config file"
-			echo "7. Update script to latest version and exit"
+			echo "7. Update script to latest version"
 		fi
 		echo ""
 		echo "e. Exit"
@@ -1131,7 +1131,9 @@ if [ "$1" = "" ]; then
 				;;
 			 [7])
 				if updatecommand; then
-					echo "Type 'knock' to return to main menu"
+					echo -n "Press any key to restart knock.sh..."
+					read -n 1 -r yn
+					exec $sf
 					exit
 				else
 					echo -n "Press any key to continue..."
