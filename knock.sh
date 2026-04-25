@@ -356,6 +356,8 @@ function runstatus {
 function showstatus {
 	dashes=$(head -c 48 < /dev/zero | tr '\0' '-')
 	echo $dashes
+	echo -e "| Knock.sh: Router Commands for non-admin users\t|"
+	echo $dashes
 	checkinstall && echo -e "| Install Status: Installed\t\t\t|" || echo -e "| Install Status: Knock not properly installed!\t|"
 	echo $dashes
 	runstatus && echo -e "|     Run Status: Running & waiting for knocks\t|" || echo -e "|     Run Status: Knock STOPPED\t\t\t|"
@@ -1014,13 +1016,6 @@ if [ "$1" = "" ]; then
 	while [ true ]; do
 		clear
 		banner
-
-		#dashes=$(head -c 113 < /dev/zero | tr '\0' '-')
-		#echo $dashes
-		#checkinstall && echo -en "|\tInstall Status: Installed\t\t\t" || echo -en "|\tInstall Status: Knock not properly installed!\t"
-		#echo -en "|\t"
-		#runstatus && echo -en "Run Status: Running & waiting for knocks\t" || echo -en "Run Status: Knock STOPPED\t\t\t"
-		#echo -e "|\n"$dashes
 		showstatus
 
 		echo ""
@@ -1133,6 +1128,8 @@ if [ "$1" = "" ]; then
 				if updatecommand; then
 					echo -n "Press any key to restart knock.sh..."
 					read -n 1 -r yn
+					echo ""
+					clear
 					exec $sf
 					exit
 				else
