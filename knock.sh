@@ -61,7 +61,6 @@
 
 version=2.0.0
 REV=$version
-
 INTERVAL=5
 DOUBLE_KNOCK_WAIT=30
 
