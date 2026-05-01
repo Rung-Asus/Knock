@@ -40,13 +40,13 @@
 #Many thanks to @Viktor Jaep for all his help, input and testing of this script!
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
-# Last Updated: 25APR2026
+# Last Updated: 1MAY2026
 
 #Update Log:
 # 1.3
 # - Fix for updated screen command
 # 1.4
-# - Added git branch swithing for update command (knock -develop or knock -main)
+# - Added git branch switching for update command (knock -develop or knock -main)
 # 2.0
 # - Added profile.add alias for knock
 # - Added -status command (shows version, installed status, and run status)
@@ -56,8 +56,10 @@
 # - Improved visuals, progress feedback, & error checking
 # - Added an SSH UI with install, configure, and uninstall functions (and more). "e" = Exit
 # - Moved "REV" to "version" variable to be compatible with amtm
+# - Added amtmupdate command
 
-version=2.0b1
+
+version=2.0.0
 REV=$version
 
 INTERVAL=5
@@ -1067,7 +1069,7 @@ if [ "$1" = "" ]; then
 
 		 [1])
 			sh $sf -install -force
-			$sf -stop -nobanner > /dev/null
+			sh $sf -stop -nobanner > /dev/null
 
 			if checkinstall ; then
 				if [ -f $tf ]; then
@@ -1085,10 +1087,10 @@ if [ "$1" = "" ]; then
 				echo ""
 				if  promptyn "Would you like to edit the config file now ("$cf")? (y/n):" ; then
 					echo ""
-					$sf -edit -nobanner
+					sh $sf -edit -nobanner
 					if  promptyn "Are you ready to start processing knocks (start knock.sh)? (y/n):" ; then
 						echo ""
-						$sf -start -nobanner
+						sh $sf -start -nobanner
 					else
 						echo ""
 						echo "When ready, please run start from main menu"
@@ -1105,6 +1107,8 @@ if [ "$1" = "" ]; then
 			echo -n "Press any key to continue..."
 			read -n 1 -r yn
 			echo ""
+			exec $sf
+			exit
 			;;
 		 [2])
 			sh $sf -uninstall
