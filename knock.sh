@@ -57,12 +57,15 @@
 # - Added an SSH UI with install, configure, and uninstall functions (and more). "e" = Exit
 # - Moved "REV" to "version" variable to be compatible with amtm
 # - Added amtmupdate command
+# 2.0.1
+# - Fix for iphone packets having constant 0 ID
 
-
-version=2.0.0
+version=2.0.1
 REV=$version
 INTERVAL=5
 DOUBLE_KNOCK_WAIT=30
+SIM_IPHONE=0
+FAKE_ID=44444
 
 fn=$(readlink -f "$0")
 jf="/jffs"
@@ -1235,9 +1238,27 @@ echo "Version" $REV
 echo "Waiting for port knocks..."
 logger -t "knock.sh" "Waiting for port knocks..."
 
+if [ "$SIM_IPHONE" -eq 1 ]; then
+	logger -t "knock.sh" "Simulating Iphone, ID = 0"
+	if [ $oldID != "" ]; then
+		logger -t "knock.sh" "oldID =" $oldID
+		oldID=0
+		logger -t "knock.sh" "Setting oldID to 0"
+	fi
+fi
+
 while sleep $INTERVAL;do
 	DATA=$(readDATA)
 	ID=$(readID)
+	if [ "$SIM_IPHONE" -eq 1 ]; then
+		if [ $ID != "" ] && [ $ID != "$FAKE_ID" ]; then
+			logger -t "knock.sh" "ID =" $ID
+			ID=0
+			logger -t "knock.sh" "Setting ID to 0"
+		fi
+	fi
+
+
 	if [ "$ID" != "$oldID" ]; then
 		KPORT=$(echo $DATA | awk '{print $2}' | awk -F '=' '{print $2}')
 		KINT=$(echo $DATA | awk '{print $3}' | awk -F '=' '{print $2}')
@@ -1279,5 +1300,21 @@ while sleep $INTERVAL;do
 		sleep $INTERVAL
 		DATA=$(readDATA)
 		oldID=$(readID)
+
+		if [ "$SIM_IPHONE" -eq 1 ]; then
+			if [ $oldID != "" ] && [ $oldID != "$FAKE_ID" ]; then
+				logger -t "knock.sh" "oldID =" $oldID
+				oldID=0
+				logger -t "knock.sh" "Setting oldID to 0"
+			fi
+		fi
+
+
+		#Fix Iphone ID always 0 issue
+		if [ $oldID -eq 0 ]; then
+			logger -t "knock.sh" "IDs are zero. Adding fake kernel ring buffer message."
+			echo "knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID="$FAKE_ID >/dev/kmsg
+			oldID=$FAKE_ID
+		fi
 	fi
 done
