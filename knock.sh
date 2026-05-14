@@ -1237,6 +1237,13 @@ echo "Version" $REV
 echo "Waiting for port knocks..."
 logger -t "knock.sh" "Waiting for port knocks..."
 
+#Fix Iphone ID always 0 issue
+if [ $oldID -eq 0 ]; then
+	logger -t "knock.sh" "IDs are zero. Adding fake kernel ring buffer message."
+	echo "knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID="$FAKE_ID >/dev/kmsg
+	oldID=$FAKE_ID
+fi
+
 while sleep $INTERVAL;do
 	DATA=$(readDATA)
 	ID=$(readID)
