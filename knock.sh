@@ -60,7 +60,7 @@
 # 2.0.1
 # - Fix for iphone packets having constant 0 ID
 
-version=2.0.1
+version=2.0.2
 REV=$version
 INTERVAL=5
 DOUBLE_KNOCK_WAIT=30
@@ -1265,14 +1265,18 @@ while sleep $INTERVAL;do
 						logger -t "knock.sh" "Starting port" $port1 "timer"
 						/opt/sbin/screen -S knock_$port1 -X quit > /dev/null
 						/opt/sbin/screen -dmS knock_$port1 sleep $DOUBLE_KNOCK_WAIT
-						break
+						#Change break to continue to fix doubleknock ignoring rest of commands
+						#break
+						continue
 					fi
 					if $(/opt/sbin/screen -ls knock_$port1 >/dev/null); then
 						echo "Port" $port1 "timer running"
 						logger -t "knock.sh" "Port" $port1 "timer running"
 						port=$port2
 					else
-						break
+						#Change break to continue to fix doubleknock ignoring rest of commands
+						#break
+						continue
 					fi
 				else
 					port=$port1
