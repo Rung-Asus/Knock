@@ -61,6 +61,7 @@
 # - Fix for iphone packets having constant 0 ID
 # 2.0.2
 # - Fix for double knock early exit bug
+# - Fix for packets without DF flag set
 
 version=2.0.2
 REV=$version
@@ -1227,7 +1228,9 @@ if [ ! -f $cf ]; then
 fi
 
 function readDATA {
-	dmesg | grep "knock.sh" | tail -n 1 | awk '{print $11 " " $15 " " $2}'; }
+	#Fix for missing "DF" flag
+	#dmesg | grep "knock.sh" | tail -n 1 | awk '{print $11 " " $15 " " $2}'; }
+	dmesg | grep "knock.sh" | tail -n 2 | awk '{print $11 " " $14 " " $15 " " $2}'; }
 function readID {
 	echo $DATA | awk '{print $1}' | awk -F '=' '{print $2}'; }
 
@@ -1251,10 +1254,19 @@ while sleep $INTERVAL;do
 	ID=$(readID)
 
 	if [ "$ID" != "$oldID" ]; then
-		KPORT=$(echo $DATA | awk '{print $2}' | awk -F '=' '{print $2}')
-		KINT=$(echo $DATA | awk '{print $3}' | awk -F '=' '{print $2}')
-		echo  "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID
-		logger -t "knock.sh" "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID
+		#Fix for missing DF flag
+		#KPORT=$(echo $DATA | awk '{print $2}' | awk -F '=' '{print $2}')
+		if $(echo $DATA | grep -q "WINDOW");then
+			KPORT=$(echo $DATA | awk '{print $2}' | awk -F '=' '{print $2}')
+			DF="DF flag not set"
+		else
+			KPORT=$(echo $DATA | awk '{print $3}' | awk -F '=' '{print $2}')
+			DF=""
+		fi
+		#KINT=$(echo $DATA | awk '{print $3}' | awk -F '=' '{print $2}')
+		KINT=$(echo $DATA | awk '{print $4}' | awk -F '=' '{print $2}')
+		echo  "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID $DF
+		logger -t "knock.sh" "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID $DF
 
 		while read ports interfaces cmd
 		do
