@@ -40,7 +40,7 @@
 #Many thanks to @Viktor Jaep for all his help, input and testing of this script!
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
-# Last Updated: 1MAY2026
+# Last Updated: 19MAY2026
 
 #Update Log:
 # 1.3
@@ -59,6 +59,8 @@
 # - Added amtmupdate command
 # 2.0.1
 # - Fix for iphone packets having constant 0 ID
+# 2.0.2
+# - Fix for double knock early exit bug
 
 version=2.0.2
 REV=$version
