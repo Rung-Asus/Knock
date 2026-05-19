@@ -1230,7 +1230,7 @@ fi
 function readDATA {
 	#Fix for missing "DF" flag
 	#dmesg | grep "knock.sh" | tail -n 1 | awk '{print $11 " " $15 " " $2}'; }
-	dmesg | grep "knock.sh" | tail -n 2 | awk '{print $11 " " $14 " " $15 " " $2}'; }
+	dmesg | grep "knock.sh" | tail -n 1 | awk '{print $11 " " $14 " " $15 " " $2}'; }
 function readID {
 	echo $DATA | awk '{print $1}' | awk -F '=' '{print $2}'; }
 
