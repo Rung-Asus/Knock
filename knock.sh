@@ -40,9 +40,7 @@
 #Many thanks to @Viktor Jaep for all his help, input and testing of this script!
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
-#-----------------------------------------------------------------------
-# Last Updated: 2026-May-18
-########################################################################
+# Last Updated: 19MAY2026
 
 #Update Log:
 # 1.3
@@ -61,42 +59,27 @@
 # - Added amtmupdate command
 # 2.0.1
 # - Fix for iphone packets having constant 0 ID
+# 2.0.2
+# - Fix for double knock early exit bug
+# - Fix for packets without DF flag set
 
-readonly version=2.0.2
-readonly REV="$version"
-readonly INTERVAL=5
-readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
-readonly DOUBLE_KNOCK_WAIT=30
+version=2.0.2
+REV=$version
+INTERVAL=5
+DOUBLE_KNOCK_WAIT=30
+FAKE_ID=44444
 
-#To handle ID field from iOS always being ZERO#
-readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
-readonly FAKE_KMESG="knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID=$FAKE_NUMID"
-
-# Give priority to built-in binaries #
-export PATH="/bin:/usr/bin:/sbin:/usr/sbin:$PATH"
-
-#-------------------------------------#
-# Added by Martinski W. [2026-May-17] #
-#-------------------------------------#
-readonly scriptFileName="${0##*/}"
-readonly scriptFNameTag="${scriptFileName%%.*}"
-readonly logTagStr="${scriptFNameTag}_[$$]"
-if [ -t 0 ] && ! tty | grep -qwi "NOT"
-then readonly isInteractive=true
-else readonly isInteractive=false
-fi
-
-fn="$(readlink -f "$0")"
+fn=$(readlink -f "$0")
 jf="/jffs"
-id="${jf}/addons/knock.d"
-cf="${id}/knock.cfg"
+id=$jf"/addons/knock.d"
+cf=$id"/knock.cfg"
 tf="/tmp/knock.cfg"
-vf="${id}/version.txt"
-js="${jf}/scripts"
-sf="${js}/knock.sh"
-pm="${js}/post-mount"
-fs="${js}/firewall-start"
-pa="${jf}/configs/profile.add"
+vf=$id"/version.txt"
+js=$jf"/scripts"
+sf=$js"/knock.sh"
+pm=$js"/post-mount"
+fs=$js"/firewall-start"
+pa=$jf"/configs/profile.add"
 giturl="https://raw.githubusercontent.com/Rung-Asus/Knock/main"
 giturld="https://raw.githubusercontent.com/Rung-Asus/Knock/develop"
 df=$id/"develop"
@@ -108,14 +91,8 @@ unset LD_LIBRARY_PATH
 [ "$HOME" != "/root" ] && export HOME="/root"
 export SCREENDIR="${HOME}/.screen"
 
-#----------------------------------------#
-# Modified by Martinski W. [2026-May-17] #
-#----------------------------------------#
-if "$isInteractive"
-then readonly stty_save="$(stty -g)"    #Save settings (e.g. blocking input)#
-fi
-trap CleanUp HUP INT QUIT ABRT TERM     #Trap exit to restore tty to normal#
-
+stty_save=$(stty -g)					#Save tty settings (e.g. blocking input)
+trap cleanup HUP INT QUIT TERM				#Trap exit to restore tty to normal
 #set -x
 
 function banner {
@@ -127,19 +104,12 @@ echo "|_|\_\|_| |_|\___/ \___|_|\_\(_)___/_| |_| v"$REV
 echo "                                          "
 }
 
-#----------------------------------------#
-# Modified by Martinski W. [2026-May-17] #
-#----------------------------------------#
-#Trap exit to restore tty to normal#
-CleanUp()
-{
-	if [ -n "${stty_save:+xSETOKx}" ]
-	then stty "$stty_save"
-	fi
+function cleanup {
+#Trap exit to restore tty to normal
+	stty $stty_save
 	clear
 	banner
-    _ReleaseMutexFLock_ checkLockOK
-	printf "\nExiting...\n"
+	echo -e "\nExiting..."
 	exit 1
 }
 
@@ -353,28 +323,23 @@ function refresh {
 
  done
 
-    if [ -n "${stty_save:+xSETOKx}" ]
-    then stty "$stty_save"  #Reset to original (e.g. blocking input)#
-    fi
-    return 0
+ stty $stty_save	#Reset tty to original (e.g. blocking input)
+ return 0
 }
 ###############################################
 
-promptyn()
-{
+function promptyn {
 	#Y/N prompt (credit Tailmon.sh)
 	while true; do
-		read -p "$1 " -n 1 -r yn
+		read -p "$1" -n 1 -r yn
 		case "${yn}" in
 			[Yy]* ) return 0 ;;
 			[Nn]* ) return 1 ;;
 			* ) echo -e "\nPlease answer y or n.";;
 		esac
-	done
-}
+	done }
 
-CheckInstall()
-{
+function checkinstall {
 	#Verify everything is in its place
 	[ -f $sf ] || return 1
 	[ -f "/opt/sbin/screen" ] || return 1
@@ -385,29 +350,385 @@ CheckInstall()
 	$(grep -q "knock.sh" $fs) || return 1
 	[ -f $pa ] || return 1
 	$(grep -q "knock.sh" $pa) || return 1
-	return 0
-}
+	return 0; }
 
-#Verify knock rules are in firewall and knock.sh is running#
-CheckStatus()
-{
-	iptables -L INPUT | grep -q '\bknock.sh' || return 1
-	/opt/sbin/screen -ls knock >/dev/null || return 1
-	return 0
-}
 
-ShowStatus()
-{
-	dashes="$(head -c 48 < /dev/zero | tr '\0' '-')"
-	echo "$dashes"
+function runstatus {
+	#Verify knock rules are in iptables and knock.sh is running
+	$(iptables -L INPUT | grep -q "knock.sh") || return 1
+	$(/opt/sbin/screen -ls knock >/dev/null )  || return 1
+	return 0; }
+
+
+function showstatus {
+	dashes=$(head -c 48 < /dev/zero | tr '\0' '-')
+	echo $dashes
 	echo -e "| Knock.sh: Router Commands for non-admin users\t|"
-	echo "$dashes"
-	CheckInstall && echo -e "| Install Status: Installed\t\t\t|" || echo -e "| Install Status: Knock not properly installed!\t|"
-	echo "$dashes"
-	CheckStatus && echo -e "|     Run Status: Running & waiting for knocks\t|" || echo -e "|     Run Status: Knock STOPPED\t\t\t|"
-	echo "$dashes"
+	echo $dashes
+	checkinstall && echo -e "| Install Status: Installed\t\t\t|" || echo -e "| Install Status: Knock not properly installed!\t|"
+	echo $dashes
+	runstatus && echo -e "|     Run Status: Running & waiting for knocks\t|" || echo -e "|     Run Status: Knock STOPPED\t\t\t|"
+	echo $dashes
 	return
 }
+
+if [ "$1" = "-status" ]; then
+		clear
+		banner
+		showstatus
+		exit
+fi
+
+function showconfig {
+	echo -e "The following ports/interfaces will execute these router commands:\n"
+	lastcomment=""
+	commandnum=0
+	while read ports interfaces cmd
+	do
+		if [ -n "$ports" ]; then
+			if [ $(echo $ports | cut -c 1-1) != "#" ]; then
+				commandnum=$(($commandnum+1))
+				echo "Command #" $commandnum
+				echo -e "\t"$lastcomment
+				echo -e "\tPort(s)" $ports "on" $interfaces
+				echo -e "\tCommand:" "$cmd"
+				interface=$(echo $interfaces | awk -F',' '{print $1}')
+				port1=$(echo $ports | awk -F',' '{print $1}')
+				echo -e "\tURL to initiate command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port1
+				port2=$(echo $ports | awk -F',' '{print $2}')
+				if [ -n "$port2" ]; then
+					echo -e "\t\tWait" $(( $INTERVAL * 3 )) "seconds then URL to complete command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port2
+				fi
+				echo -e ""
+			else
+				lastcomment=$(echo "$ports $interfaces $cmd" | cut -c 2-)
+			fi
+		fi
+	done < $cf
+}
+
+if [ "$1" = "-config" ]; then
+	if [ ! -f $cf ]; then
+		echo "Error: Missing configuration file" $cf
+		exit 1
+	fi
+	clear
+	banner
+	showconfig
+	exit
+fi
+
+if [ "$1" = "-screen" ]; then
+	if [ ! -f "/opt/sbin/screen" ]; then
+		logger -t "knock.sh" "Error: Entware Screen app not installed"
+		exit 1
+	fi
+	if [ ! -f $sf ]; then
+		logger -t "knock.sh" "Error: knock.sh not installed yet"
+		exit 1
+	fi
+
+	logger -t "knock.sh" "Starting knock.sh background process"
+
+	/opt/sbin/screen -S knock -X quit > /dev/null
+	/opt/sbin/screen -dmS knock "$sf" -loop
+	sleep 4  #wait for any aborts
+	runstatus && exit 0 || exit 1
+fi
+
+if [ "$1" = "-firewall" ]; then
+	if [ ! -f $cf ]; then
+		logger -t "knock.sh" "Error: Missing configuration file" $cf
+		exit 1
+	fi
+
+	logger -t "knock.sh" "Adding knock ports to iptables"
+
+	while read ports interfaces cmd
+	do
+		if [ -n "$ports" ] && [ $(echo $ports | cut -c 1-1) != "#" ]; then
+			COUNT=0
+			for port in $(echo $ports | tr ',' ' '); do
+				COUNT=$(($COUNT+1))
+				if [ $COUNT -gt 2 ]; then
+					break
+				fi
+				for interface in $(echo $interfaces | tr ',' ' '); do
+					iptables -D INPUT -i $interface -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info 2> /dev/null
+					iptables -I INPUT -i $interface -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info
+				done
+			done
+		fi
+	done < $cf
+
+	exit
+fi
+
+if [ "$1" = "-install" ]; then
+
+	if [ "$2" = "" ]; then
+		clear
+		banner
+		if ! promptyn "Proceed with installing knock? (y/n):" ; then
+			echo -e "\nThanks for trying knock.sh!"
+			exit
+		fi
+
+		echo ""
+		echo "Installing knock.sh..."
+	fi
+
+	#Check run location
+	if [ "$fn" != "$sf" ]; then
+		echo "Error: This script must be run from" $js
+		exit 1
+	fi
+	chmod 755 $sf
+
+	#Check entware
+	echo -ne "\tChecking for Entware..."
+	if [ ! -f "/opt/bin/opkg" ]; then
+		echo -e "\nError: Knock.sh requires Entware. Please install Entware using the 'amtm' utility."
+		exit 1
+	fi
+	echo -e $cm
+
+	#Check screen, optionally install
+	echo -ne "\tChecking for Screen utility..."
+	if [ ! -f "/opt/sbin/screen" ]; then
+
+		echo ""
+		echo -e "\nKnock.sh requires the Entware utility 'screen'"
+
+		if  promptyn "Proceed with installing 'screen'? (y/n):" ; then
+			echo ""
+			opkg install screen
+			if [ ! -f "/opt/sbin/screen" ]; then
+				echo "Entware screen install failed"
+				exit 1
+			fi
+		else
+			echo ""
+			echo "Cancelling install"
+			exit 1
+		fi
+		echo -ne "\tScreen successfully installed."
+	fi
+	echo -e $cm
+
+	#Setup config file
+	echo -ne "\tChecking config file..."
+	if [ ! -d $jf"/addons" ]; then
+		echo -e "\nError: This script is designed for Asuswrt-Merlin firmware only"
+		exit 1
+	fi
+	mkdir $id 2>/dev/null
+	echo -e $cm
+
+	if [ ! -f $cf ]; then
+		echo -ne "\tCreating config file..."
+
+		cat <<EOF > $cf
+#knock.sh Example configuration file
+
+#Format Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]
+
+#Wake up PC if 44444 knock comes from main lan, tailscale (lo), or wireguard server (wgs1)
+44444 br0,lo,wgs1 ether-wake -i br0 xx:xx:xx:xx:xx:xx
+
+#Reboot router if 44445 knock comes from main lan, tailscale (lo), or wireguard server (wgs1)
+44445 br0,lo,wgs1 reboot
+
+#Turn on VPN client
+44446 br0 /jffs/scripts/enable-wireguard-rule.sh
+
+#Turn off vpn client
+44447 br0 /jffs/scripts/disable-wireguard-rule.sh
+
+#Sensitive command. Only execute command after a knock from two different ports (15 seconds apart)
+44449,44410 br0 /jffs/scripts/doubleknock.sh
+
+EOF
+
+		echo -e $cm
+
+		if [ "$2" = "" ]; then
+		 #Optionally restore saved config file, if it exists
+		 if [ -f $tf ]; then
+			echo -ne "\t"
+			if  promptyn "Restore saved config file ("$tf")? (y/n):" ; then
+				echo -en "\n\tRestoring saved file..."
+				cp $tf $cf
+				echo -e $cm
+			else
+				echo -e "\n\tKeeping default file."
+			fi
+		 fi
+		fi
+	fi
+
+	#Add post-mount command
+	echo -ne "\tUpdating post-mount file..."
+	if ! [ -f $pm ]; then
+		echo "#!/bin/sh" > $pm
+      		echo "" >> $pm
+		chmod 755 $pm
+	fi
+	sed -i -e '/knock.sh/d' $pm
+	echo "(sleep 30 &&" $sf "-screen) & # Added by knock.sh" >> $pm
+	echo -e $cm
+
+	#Add firewall-start command
+	echo -ne "\tUpdating firewall-start file..."
+	if ! [ -f $fs ]; then
+		echo "#!/bin/sh" > $fs
+      		echo "" >> $fs
+		chmod 755 $fs
+	fi
+	sed -i -e '/knock.sh/d' $fs
+	echo $sf "-firewall # Added by knock.sh" >> $fs
+	echo -e $cm
+
+	#add profile.add command
+	echo -ne "\tUpdating profile.add file..."
+	if ! [ -f $pa ]; then
+		touch $pa
+	fi
+	sed -i -e '/knock.sh/d' $pa
+	echo "alias knock=\"sh" $sf"\" # Added by knock.sh" >> $pa
+	echo -e $cm
+
+	if [ "$2" = "" ]; then
+		echo ""
+		echo "Knock.sh Rev" $REV "successfully installed!"
+		echo ""
+		if  promptyn "Would you like to edit the config file now ("$cf")? (y/n):" ; then
+			echo ""
+			$sf -edit -nobanner
+			if  promptyn "Are you ready to start processing knocks (start knock.sh)? (y/n):" ; then
+				echo ""
+				$sf -start
+			else
+				echo -e "\nWhen ready, please run 'knock -start'"
+			fi
+		else
+			echo -e "\nPlease update the configuration file from the default ('knock -edit')"
+			echo ""
+			echo "Once updated, please run 'knock -start' to begin processing knocks"
+		fi
+	fi
+	exit
+fi
+
+if [ "$1" = "-start" ] || [ "$1" = "-restart" ]; then
+	if [ ! -f $cf ]; then
+		echo "Error: Missing configuration file" $cf
+		exit 1
+	fi
+
+	service restart_firewall >/dev/null
+
+	echo "Starting knock.sh background process..."
+
+	if $sf "-screen"; then
+		if [ "$2" = "" ]; then
+			clear
+			banner
+			echo "Knock.sh started and ready for port knocks"
+			echo ""
+			showconfig
+		fi
+	else
+		echo "Error: Cannot start knock in background"
+		exit 1
+	fi
+	exit
+fi
+
+if [ "$1" = "-stop" ]; then
+	screen -S knock -X quit > /dev/null
+	if [ "$2" = "" ]; then
+		clear
+		banner
+	fi
+	echo "knock.sh stopped"
+	exit
+fi
+
+if [ "$1" = "-uninstall" ]; then
+
+	clear
+	banner
+	if ! promptyn "Proceed with uninstalling knock? (y/n):" ; then
+		echo ""
+		echo -e "\nExiting uninstallation"
+		exit
+	fi
+	echo ""
+
+	screen -S knock -X quit > /dev/null
+	sed -i -e '/knock.sh/d' $pm	#remove post-mount command
+	sed -i -e '/knock.sh/d' $fs	#remove firewall-start command
+	sed -i -e '/knock.sh/d' $pa	#remove profile.add command
+
+	service restart_firewall >/dev/null #Remove iptable modifications
+
+	rm $sf #Remove script file
+	cp $cf $tf #Save config in temp folder
+	rm $cf #Remove config fire
+	rm $vf 2> /dev/null #Remove version file
+	rm $df 2> /dev/null #Remove develop flag
+
+	#Attempt to remove installation directory
+	if [ $(pwd) = $id ]; then
+		echo "Error: cannot remove install directory" $id
+	else
+		rmdir $id 2>/dev/null
+	fi
+
+	echo ""
+	echo "Knock.sh uninstalled"
+	echo "Existing configuration file saved as" $tf
+	echo "Thanks for using knock.sh!"
+	exit
+fi
+
+if [ "$1" = "-develop" ]; then
+        touch $df
+	exit
+fi
+
+if [ "$1" = "-main" ]; then
+        rm $df 2> /dev/null
+	exit
+fi
+
+if [ "$1" = "amtmupdate" ]; then
+	if [ "$2" = "check" ]; then
+		exit 0
+	fi
+
+	if [ -f $df ]; then
+		giturl=$giturld
+	fi
+
+	echo -n "Running amtmupdate..."
+	rm $vf 2> /dev/null
+	curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/version.txt" -o $vf
+	if [ -f $vf ]; then
+		curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/knock.sh" -o $sf
+		$sf -install -force > /dev/null
+		$sf -start -nobanner > /dev/null
+		echo -e $cm
+		echo "amtmupdate completed."
+		exit 0
+	else
+		echo ""
+		echo "amtmupdate failed."
+		exit 1
+	fi
+
+fi
 
 function updatecommand {
 	clear
@@ -424,7 +745,7 @@ function updatecommand {
 		nv=$(cat $vf | head -n 1)
 		echo "Latest version:" $nv
 		echo "Current version:" $REV
-		if promptyn "Proceed with update? (y/n):" ; then
+		if  promptyn "Proceed with update? (y/n):" ; then
 			echo -e "\nDownloading..."
 			curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/knock.sh" -o $sf
 			chmod 755 $sf
@@ -435,9 +756,9 @@ function updatecommand {
 			echo "Update completed."
 			echo ""
 			echo -e "Knock version:\t"$REV
-			ShowStatus
+			showstatus
 			echo ""
-			ShowConfig
+			showconfig
 		else
 			echo -e "\nNo update performed"
 			return 1
@@ -448,6 +769,11 @@ function updatecommand {
 	fi
 	return 0
 }
+
+if [ "$1" = "-update" ]; then
+	updatecommand
+	exit
+fi
 
 function editcommand {
 	function editknockentry {
@@ -463,11 +789,8 @@ function editcommand {
 		editline
 		st=${st// /}
 		allgood=1
-		for port in ${st//,/ }
-		do
-			if echo "$port" | grep -qE "^[1-9][0-9]{3,4}$" && \
-			   [ "$port" -ge "$MIN_KNOCK_PORT" ] && [ "$port" -le 65535 ]
-			then
+		for port in ${st//,/ }; do
+			if [ $port -gt 0 -a $port -le 65535 ] 2> /dev/null; then
 				continue
 			else
 				allgood=0
@@ -502,27 +825,27 @@ function editcommand {
 	}
 
 	#Read configuration file into virtual array
-	lastComment=""
-	commandNum=0
+	lastcomment=""
+	commandnum=0
 	updated=0
 	while read ports interfaces cmd; do
 		if [ -n "$ports" ]; then
 			if [ $(echo $ports | cut -c 1-1) != "#" ]; then
 				#Not a command line
-				commandNum=$((commandNum+1))
+				commandnum=$((commandnum+1))
 
 				#Load data into pseudo array
-				eval comment$commandNum=\"$lastComment\"
-				eval ports$commandNum=\"$ports\"
-				eval interfaces$commandNum=\"$interfaces\"
-				eval cmd$commandNum=\"$cmd\"
+				eval comment$commandnum=\"$lastcomment\"
+				eval ports$commandnum=\"$ports\"
+				eval interfaces$commandnum=\"$interfaces\"
+				eval cmd$commandnum=\"$cmd\"
 			else
 				#Commment line
-				lastComment=$(echo "$ports $interfaces $cmd" | cut -c 2-)
+				lastcomment=$(echo "$ports $interfaces $cmd" | cut -c 2-)
 			fi
 		fi
 	done < $cf
-	commandcount=$commandNum
+	commandcount=$commandnum
 
 	#Edit menu loop
 	while [ true ]; do
@@ -531,17 +854,17 @@ function editcommand {
 		dashes=$(head -c $cols < /dev/zero | tr '\0' '-')
 		{
 			echo -e "The following ports/interfaces will execute these router commands:\n"
-			commandNum=0
+			commandnum=0
 
 			#Display virtual array
-			while [ $commandNum -lt $commandcount ]; do
-				commandNum=$((commandNum+1))
+			while [ $commandnum -lt $commandcount ]; do
+				commandnum=$((commandnum+1))
 				echo $dashes
-				echo "Command #" $commandNum
-				comment="$(eval echo \"\$comment$commandNum\")"
-				ports=$(eval echo \"\$ports$commandNum\")
-				interfaces=$(eval echo \"\$interfaces$commandNum\")
-				cmd=$(eval echo \"\$cmd$commandNum\")
+				echo "Command #" $commandnum
+				comment="$(eval echo \"\$comment$commandnum\")"
+				ports=$(eval echo \"\$ports$commandnum\")
+				interfaces=$(eval echo \"\$interfaces$commandnum\")
+				cmd=$(eval echo \"\$cmd$commandnum\")
 
 				echo -en "\t"
 				echo $comment
@@ -556,7 +879,7 @@ function editcommand {
 					echo -e "\tURL to initiate command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port1
 					port2=$(echo $ports | awk -F',' '{print $2}')
 					if [ -n "$port2" ]; then
-						echo -e "\t\tWait" $((INTERVAL * 3)) "seconds then URL to complete command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port2
+						echo -e "\t\tWait" $(( $INTERVAL * 3 )) "seconds then URL to complete command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port2
 					fi
 				else
 					echo $interface "is an invalid interface!"
@@ -573,31 +896,31 @@ function editcommand {
 		case $SelectEdit in
 		 [Aa])
 			#Add command
-			commandNum=$commandcount
+			commandnum=$commandcount
 			comment="Example comment"
 			ports=44444
 			interfaces="br0"
 			cmd="ls #example command"
-			if [ $commandNum -ne 0 ]; then
-				ports=$(eval echo \"\$ports$commandNum\")
+			if [ $commandnum -ne 0 ]; then
+				ports=$(eval echo \"\$ports$commandnum\")
 				ports=$((ports+1))
-				comment="$(eval echo \"\$comment$commandNum\")"
-				interfaces=$(eval echo \"\$interfaces$commandNum\")
-				cmd=$(eval echo \"\$cmd$commandNum\")
+				comment="$(eval echo \"\$comment$commandnum\")"
+				interfaces=$(eval echo \"\$interfaces$commandnum\")
+				cmd=$(eval echo \"\$cmd$commandnum\")
 			fi
-			commandNum=$((commandNum+1))
-			commandcount=$commandNum
+			commandnum=$((commandnum+1))
+			commandcount=$commandnum
 
-			echo "Adding new Command #" $commandNum
+			echo "Adding new Command #" $commandnum
 			echo ""
 			editknockentry
 			echo ""
 			echo -n "Save changes to port knock entry? (y=Yes, n=No):"
-			if promptyn ' ' ; then
-				eval comment$commandNum=\"$comment\"
-				eval ports$commandNum=\"$ports\"
-				eval interfaces$commandNum=\"$interfaces\"
-				eval cmd$commandNum=\"$cmd\"
+			if promptyn ; then
+				eval comment$commandnum=\"$comment\"
+				eval ports$commandnum=\"$ports\"
+				eval interfaces$commandnum=\"$interfaces\"
+				eval cmd$commandnum=\"$cmd\"
 				updated=1
 			else
 				commandcount=$((commandcount-1))
@@ -609,26 +932,26 @@ function editcommand {
 			while [ true ]; do
 				echo ""
 				echo -n "Enter command number to delete (1 to" $commandcount"): "
-				read -p "" commandNum
-				if [ $commandNum -gt 0 -a $commandNum -le $commandcount ] 2> /dev/null; then
+				read -p "" commandnum
+				if [ $commandnum -gt 0 -a $commandnum -le $commandcount ] 2> /dev/null; then
 					break
 				fi
 			done
 			echo ""
-			echo -n "Delete knock entry #" $commandNum "? (y=Yes, n=No): "
-			if promptyn ' ' ; then
-				while [ $commandNum -lt $commandcount ]; do
-					commandnumold=$((commandNum+1))
+			echo -n "Delete knock entry #" $commandnum "? (y=Yes, n=No): "
+			if promptyn ; then
+				while [ $commandnum -lt $commandcount ]; do
+					commandnumold=$((commandnum+1))
 					comment="$(eval echo \"\$comment$commandnumold\")"
 					ports=$(eval echo \"\$ports$commandnumold\")
 					interfaces=$(eval echo \"\$interfaces$commandnumold\")
 					cmd=$(eval echo \"\$cmd$commandnumold\")
-					eval comment$commandNum=\"$comment\"
-					eval ports$commandNum=\"$ports\"
-					eval interfaces$commandNum=\"$interfaces\"
-					eval cmd$commandNum=\"$cmd\"
+					eval comment$commandnum=\"$comment\"
+					eval ports$commandnum=\"$ports\"
+					eval interfaces$commandnum=\"$interfaces\"
+					eval cmd$commandnum=\"$cmd\"
 
-					commandNum=$commandnumold
+					commandnum=$commandnumold
 				done
 				commandcount=$((commandcount-1))
 				updated=1
@@ -640,17 +963,17 @@ function editcommand {
 			while [ true ]; do
 				echo ""
 				echo -n "Enter command number to edit (1 to" $commandcount"): "
-				read -p "" commandNum
-				if [ $commandNum -gt 0 -a $commandNum -le $commandcount ] 2> /dev/null; then
+				read -p "" commandnum
+				if [ $commandnum -gt 0 -a $commandnum -le $commandcount ] 2> /dev/null; then
 					break
 				fi
 			done
-			comment="$(eval echo \"\$comment$commandNum\")"
-			ports=$(eval echo \"\$ports$commandNum\")
-			interfaces=$(eval echo \"\$interfaces$commandNum\")
-			cmd=$(eval echo \"\$cmd$commandNum\")
+			comment="$(eval echo \"\$comment$commandnum\")"
+			ports=$(eval echo \"\$ports$commandnum\")
+			interfaces=$(eval echo \"\$interfaces$commandnum\")
+			cmd=$(eval echo \"\$cmd$commandnum\")
 			clear
-			echo "Editing Command #" $commandNum
+			echo "Editing Command #" $commandnum
 			echo ""
 			echo -en "\t"
 			echo $comment
@@ -662,11 +985,11 @@ function editcommand {
 			echo ""
 			editknockentry
 			echo -n "Save changes to port knock entry? (y=Yes, n=No):"
-			if promptyn ' ' ; then
-				eval comment$commandNum=\"$comment\"
-				eval ports$commandNum=\"$ports\"
-				eval interfaces$commandNum=\"$interfaces\"
-				eval cmd$commandNum=\"$cmd\"
+			if promptyn ; then
+				eval comment$commandnum=\"$comment\"
+				eval ports$commandnum=\"$ports\"
+				eval interfaces$commandnum=\"$interfaces\"
+				eval cmd$commandnum=\"$cmd\"
 				updated=1
 			fi
 			;;
@@ -678,19 +1001,19 @@ function editcommand {
 	echo ""
 	if [ $updated -eq 1 ]; then
 		echo -n "Save changes to config file? (y=Yes, n=No):"
-		if promptyn ' ' ; then
+		if promptyn ; then
 			echo -en "\nSaving configuration"
 
 			echo "#knock.sh configuration file" > $cf
 			echo -e "\n#Format Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]\n" >> $cf
 
 			#Write virtual array back to config file
-			commandNum=0
-			while [ $commandNum -lt $commandcount ]; do
-				commandNum=$((commandNum+1))
-				echo -n "..."$commandNum
-				echo "$(eval echo \"#\$comment$commandNum\")" >> $cf
-				echo $(eval echo \"\$ports$commandNum \$interfaces$commandNum \$cmd$commandNum\") >> $cf
+			commandnum=0
+			while [ $commandnum -lt $commandcount ]; do
+				commandnum=$((commandnum+1))
+				echo -n "..."$commandnum
+				echo "$(eval echo \"#\$comment$commandnum\")" >> $cf
+				echo $(eval echo \"\$ports$commandnum \$interfaces$commandnum \$cmd$commandnum\") >> $cf
 				echo "" >> $cf
 			done
 			echo -e "\n\nNew config file:"
@@ -705,8 +1028,7 @@ function editcommand {
 		fi
 	fi
 
-	if [ $# -lt 2 ] || [ -z "$2" ]
-	then
+	if [ "$2" = "" ]; then
 		clear
 		banner
 		echo "Thanks for using knock.sh!"
@@ -714,120 +1036,19 @@ function editcommand {
 	return
 }
 
-#-------------------------------------#
-# Added by Martinski W. [2026-May-18] #
-#-------------------------------------#
-readonly pLogALERT=1
-readonly pLogCRITC=2
-readonly pLogERROR=3
-readonly pLogWARNG=4
-readonly pLogNOTIC=5
-readonly pLogINFOR=6
-readonly CLEARct="\e[0m"
-readonly ERRORct="\e[1;31m"
+if [ "$1" = "-edit" ]; then
+	editcommand "-edit" $2
+	exit
+fi
 
-_LogMsg_()
-{
-    if [ $# -lt 1 ] || [ -z "$1" ]
-    then return 1
-    fi
-    if [ $# -lt 2 ] || [ -z "$2" ] || \
-       ! echo "$2" | grep -qE "^[1-6]$"
-    then logPrioNum="$pLogNOTIC"
-    else logPrioNum="$2"
-    fi
-    if "$isInteractive" && \
-       { [ $# -lt 2 ] || [ "$2" != "NOECHO" ] ; }
-    then
-        if [ "$logPrioNum" -gt "$pLogERROR" ]
-        then printf "${1}\n"
-        else printf "\n${ERRORct}${1}${CLEARct}\n"
-        fi
-    fi
-    logger -t "$logTagStr" -p $logPrioNum "$1"
-}
 
-#-------------------------------------#
-# Added by Martinski W. [2026-May-18] #
-#-------------------------------------#
-_ValidatePortNumber_()
-{
-    if [ $# -eq 0 ] || [ -z "$1" ] || \
-       ! echo "$1" | grep -qE "^[1-9][0-9]{3,4}$" || \
-       [ "$1" -lt "$MIN_KNOCK_PORT" ] || [ "$1" -gt 65535 ]
-    then
-        _LogMsg_ "**ERROR**: INVALID port number [$1]" $pLogERROR
-        return 1
-    fi
-    return 0
-}
+if [ "$1" = "" ]; then
 
-##-------------------------------------##
-## Added by Martinski W. [2026-May-17] ##
-##-------------------------------------##
-knockMutexFLock_FD=564
-knockMutexFLock_FN="/tmp/var/${scriptFNameTag}_Loop.FLOCK"
-knockMutexFLock_OK=false  #DO NOT have FLock#
-
-_ReleaseMutexFLock_()
-{
-    if [ $# -gt 0 ] && \
-       [ "$1" = "checkLockOK" ] && \
-       [ "$knockMutexFLock_OK" = "false" ]
-    then return 0
-    fi
-    printf '' > "$knockMutexFLock_FN"
-    flock -u "$knockMutexFLock_FD" 2>/dev/null
-    knockMutexFLock_OK=false
-}
-
-_AcquireMutexFLock_()
-{
-    local retCode  procInfo  procName  procIDno  procIDof=""
-
-    if [ -s "$knockMutexFLock_FN" ]
-    then
-        procInfo="$(head -n1 "$knockMutexFLock_FN")"
-        procName="$(echo "$procInfo" | cut -d'|' -f1)"
-        procIDno="$(echo "$procInfo" | cut -d'|' -f2)"
-        if [ -n "$procName" ] && [ -n "$procIDno" ]
-        then procIDof="$(pidof "$procName")"
-        fi
-        if [ -z "$procIDof" ] || \
-           ! echo "$procIDof" | grep -qow "$procIDno"
-        then
-            _LogMsg_ "Stale Lock Found. Resetting Lock file..."
-            _ReleaseMutexFLock_
-        fi
-    fi
-
-    [ ! -s "$knockMutexFLock_FN" ] && \
-    eval exec "$knockMutexFLock_FD>$knockMutexFLock_FN"
-
-    if flock -x -n "$knockMutexFLock_FD" 2>/dev/null
-    then
-        printf "$(basename "$0")|$$\n" > "$knockMutexFLock_FN"
-        retCode=0 ; knockMutexFLock_OK=true
-    else
-        procInfo="$(head -n1 "$knockMutexFLock_FN")"
-        if [ -n "$procInfo" ]
-        then procInfo="$(echo "$procInfo" | sed 's/|/, PID=/')"
-        fi
-        _LogMsg_ "**ERROR**: Another process [$procInfo] has the Lock." $pLogERROR
-        retCode=1 ; knockMutexFLock_OK=false
-    fi
-
-    return "$retCode"
-}
-
-## Main Menu ##
-if [ $# -eq 0 ] || [ -z "$1" ]
-then
-	while true
-    do
+	#Main menu loop
+	while [ true ]; do
 		clear
 		banner
-		ShowStatus
+		showstatus
 
 		echo ""
 		echo "Main Menu"
@@ -835,7 +1056,7 @@ then
 		echo ""
 		echo "1. Install/reinstall knock.sh"
 		echo "2. Uninstall knock.sh"
-		if CheckInstall ; then
+		if checkinstall ; then
 			echo "3. Display knock.sh config file"
 			echo "4. Start/restart knock.sh background process"
 			echo "5. Stop knock.sh background process"
@@ -854,7 +1075,7 @@ then
 			sh $sf -install -force
 			sh $sf -stop -nobanner > /dev/null
 
-			if CheckInstall ; then
+			if checkinstall ; then
 				if [ -f $tf ]; then
 					echo -ne "\t"
 					if  promptyn "Restore saved config file ("$tf")? (y/n):" ; then
@@ -901,7 +1122,7 @@ then
 		 [Ee]) break;;
 		esac
 
-		if CheckInstall ; then
+		if checkinstall ; then
 			case $SelectMenu in
 
 		 	 [3])
@@ -957,448 +1178,12 @@ then
 
 	clear
 	banner
-	printf "\nThanks for using knock.sh!\n\n"
-	exit
-fi
-
-if [ "$1" = "-status" ]
-then
-    clear
-    banner
-    ShowStatus
-    exit
-fi
-
-#----------------------------------------#
-# Modified by Martinski W. [2026-May-18] #
-#----------------------------------------#
-ShowConfig()
-{
-	local lastComment=""  commandNum=0  portNum1  portNum2  IFace
-
-	_Get_IFace_IPAddress_()
-	{
-		if [ $# -eq 0 ] || [ -z "$1" ] ; then echo "ERROR" ; return 1 ; fi
-		ifconfig "$1" | awk '{print $2}' | grep 'addr:' | awk -F':' '{print $2}'
-	}
-
-	printf "The following ports/interfaces will execute these router commands:\n\n"
-
-	while read -r thePORTS theIFACES theCMDx
-	do
-		if [ -z "$thePORTS" ]
-		then
-			lastComment=""
-			continue
-		fi
-		if [ "$(echo "$thePORTS" | cut -c 1-1)" != "#" ]
-		then
-			commandNum="$((commandNum + 1))"
-			printf "Command #%2d\n" "$commandNum"
-			if [ -n "$lastComment" ]
-			then
-				printf "\t%s\n" "$lastComment"
-				lastComment=""
-			fi
-			printf "\tPort(s): %s on %s\n" "$thePORTS" "$theIFACES"
-			printf "\tCommand: %s\n" "$theCMDx"
-
-			portNum1="$(echo "$thePORTS" | awk -F',' '{print $1}')"
-			portNum2="$(echo "$thePORTS" | awk -F',' '{print $2}')"
-			if { [ -n "$portNum1" ] && ! _ValidatePortNumber_ "$portNum1" ; } || \
-			   { [ -n "$portNum2" ] && ! _ValidatePortNumber_ "$portNum2" ; }
-			then
-				_LogMsg_ "*WARNING*: The port knock entry will be ignored" $pLogWARNG
-				printf "\n\n"
-				continue
-			fi
-			IFace="$(echo "$theIFACES" | awk -F',' '{print $1}')"
-			printf "\tURL to initiate command: "
-			printf "http://%s:%s\n" "$(_Get_IFace_IPAddress_ "$IFace")" "$portNum1"
-
-			if [ -n "$portNum2" ]
-			then
-				printf "\t\tWait $((INTERVAL * 3)) seconds then URL to complete command: "
-				printf "http://%s:%s\n" "$(_Get_IFace_IPAddress_ "$IFace")" "$portNum2"
-			fi
-			echo
-		else
-			lastComment="$(echo "$thePORTS $theIFACES $theCMDx" | cut -c 2- | sed 's/^ *//')"
-		fi
-	done < "$cf"
-}
-
-if [ "$1" = "-config" ]
-then
-	if [ ! -s "$cf" ]
-	then
-		_LogMsg_ "**ERROR**: Missing configuration file [$cf]" $pLogERROR
-		exit 1
-	fi
-	clear
-	banner
-	ShowConfig
-	exit
-fi
-
-if [ "$1" = "-screen" ]
-then
-	if [ ! -s "/opt/sbin/screen" ]
-	then
-		_LogMsg_ "**ERROR**: Entware Screen app not installed" $pLogERROR
-		exit 1
-	fi
-	if [ ! -s "$sf" ]
-	then
-		_LogMsg_ "**ERROR**: knock.sh is not installed yet" $pLogERROR
-		exit 1
-	fi
-
-	_LogMsg_ "Starting knock.sh background process" NOECHO
-
-	/opt/sbin/screen -S knock -X quit >/dev/null
-	sleep 3  #Allow time to terminate process#
-	/opt/sbin/screen -dmS knock "$sf" -loop
-	sleep 4  #Wait for any aborts#
-	CheckStatus && exit 0 || exit 1
-fi
-
-#----------------------------------------#
-# Modified by Martinski W. [2026-May-18] #
-#----------------------------------------#
-if [ "$1" = "-firewall" ]
-then
-	if [ ! -s "$cf" ]
-	then
-		_LogMsg_ "**ERROR**: Missing configuration file [$cf]" $pLogERROR
-		exit 1
-	fi
-	_LogMsg_ "Adding port knocking rules to firewall"
-
-	while read -r cfgLINE
-	do
-		if [ -z "$cfgLINE" ] || \
-		   echo "$cfgLINE" | grep -qE "^[[:blank:]]*[#].*"
-		then continue  #Skip Line#
-		fi
-		thePORTS="$(echo "$cfgLINE" | awk -F' ' '{print $1}')"
-		theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
-		theCMDx="$(echo "$cfgLINE" | cut -d' ' -f3-)"
-
-		if [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
-		then
-			_LogMsg_ "**ERROR**: The port knock entry [$cfgLINE] is INVALID" $pLogERROR
-			continue
-		fi
-		COUNT=0
-		for port in $(echo "$thePORTS" | tr ',' ' ')
-		do
-			COUNT="$((COUNT + 1))"
-			if [ "$COUNT" -gt 2 ] || ! _ValidatePortNumber_ "$port"
-			then
-				_LogMsg_ "*WARNING*: The port knock entry [$cfgLINE] is ignored" $pLogWARNG
-				break
-			fi
-			for IFace in $(echo "$theIFACE" | tr ',' ' ')
-			do
-				iptables -D INPUT -i $IFace -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info 2>/dev/null
-				iptables -I INPUT -i $IFace -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info
-			done
-		done
-	done < "$cf"
-
-	exit
-fi
-
-if [ "$1" = "-install" ]
-then
-	if [ $# -lt 2 ] || [ -z "$2" ]
-	then
-		clear
-		banner
-		if ! promptyn "Proceed with installing knock? (y/n):" ; then
-			echo -e "\nThanks for trying knock.sh!"
-			exit
-		fi
-
-		echo ""
-		echo "Installing knock.sh..."
-	fi
-
-	#Check run location#
-	if [ "$(dirname "$fn")" != "$js" ]
-    then
-		echo "Error: This script must be run from $js"
-		exit 1
-	fi
-	chmod 755 $sf
-
-	#Check entware
-	echo -ne "\tChecking for Entware..."
-	if [ ! -f "/opt/bin/opkg" ]; then
-		echo -e "\nError: Knock.sh requires Entware. Please install Entware using the 'amtm' utility."
-		exit 1
-	fi
-	echo -e $cm
-
-	#Check screen, optionally install
-	echo -ne "\tChecking for Screen utility..."
-	if [ ! -f "/opt/sbin/screen" ]; then
-
-		echo ""
-		echo -e "\nKnock.sh requires the Entware utility 'screen'"
-
-		if promptyn "Proceed with installing 'screen'? (y/n):" ; then
-			echo ""
-			opkg install screen
-			if [ ! -f "/opt/sbin/screen" ]; then
-				echo "Entware screen install failed"
-				exit 1
-			fi
-		else
-			echo ""
-			echo "Cancelling install"
-			exit 1
-		fi
-		echo -ne "\tScreen successfully installed."
-	fi
-	echo -e $cm
-
-	#Setup config file
-	echo -ne "\tChecking config file..."
-	if [ ! -d $jf"/addons" ]; then
-		echo -e "\nError: This script is designed for Asuswrt-Merlin firmware only"
-		exit 1
-	fi
-	mkdir $id 2>/dev/null
-	echo -e $cm
-
-	if [ ! -f $cf ]; then
-		echo -ne "\tCreating config file..."
-
-		cat <<EOF > $cf
-#knock.sh Example configuration file
-
-#Format Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]
-
-#Wake up PC if 44444 knock comes from main lan, tailscale (lo), or wireguard server (wgs1)
-44444 br0,lo,wgs1 ether-wake -i br0 xx:xx:xx:xx:xx:xx
-
-#Reboot router if 44445 knock comes from main lan, tailscale (lo), or wireguard server (wgs1)
-44445 br0,lo,wgs1 reboot
-
-#Turn on VPN client
-44446 br0 /jffs/scripts/enable-wireguard-rule.sh
-
-#Turn off vpn client
-44447 br0 /jffs/scripts/disable-wireguard-rule.sh
-
-#Sensitive command. Only execute command after a knock from two different ports (15 seconds apart)
-44449,44410 br0 /jffs/scripts/doubleknock.sh
-
-EOF
-
-		echo -e $cm
-
-		if [ $# -lt 2 ] || [ -z "$2" ]
-		then
-		    #Optionally restore saved config file, if it exists
-		 if [ -f $tf ]; then
-			echo -ne "\t"
-			if promptyn "Restore saved config file ("$tf")? (y/n):" ; then
-				echo -en "\n\tRestoring saved file..."
-				cp $tf $cf
-				echo -e $cm
-			else
-				echo -e "\n\tKeeping default file."
-			fi
-		 fi
-		fi
-	fi
-
-	#Add post-mount command
-	echo -ne "\tUpdating post-mount file..."
-	if ! [ -f $pm ]; then
-		echo "#!/bin/sh" > $pm
-      		echo "" >> $pm
-		chmod 755 $pm
-	fi
-	sed -i -e '/knock.sh/d' $pm
-	echo "(sleep 30 &&" $sf "-screen) & # Added by knock.sh" >> $pm
-	echo -e $cm
-
-	#Add firewall-start command
-	echo -ne "\tUpdating firewall-start file..."
-	if [ ! -f $fs ]; then
-		echo "#!/bin/sh" > $fs
-      		echo "" >> $fs
-		chmod 755 $fs
-	fi
-	sed -i -e '/knock.sh/d' $fs
-	echo $sf "-firewall # Added by knock.sh" >> $fs
-	echo -e $cm
-
-	#add profile.add command
-	echo -ne "\tUpdating profile.add file..."
-	if ! [ -f $pa ]; then
-		touch $pa
-	fi
-	sed -i -e '/knock.sh/d' $pa
-	echo "alias knock=\"sh" $sf"\" # Added by knock.sh" >> $pa
-	echo -e $cm
-
-	if [ $# -lt 2 ] || [ -z "$2" ]
-	then
-		echo ""
-		echo "Knock.sh Rev" $REV "successfully installed!"
-		echo ""
-		if promptyn "Would you like to edit the config file now ("$cf")? (y/n):" ; then
-			echo
-			$sf -edit -nobanner
-			if promptyn "Are you ready to start processing knocks (start knock.sh)? (y/n):" ; then
-				echo ""
-				$sf -start
-			else
-				echo -e "\nWhen ready, please run 'knock -start'"
-			fi
-		else
-			echo -e "\nPlease update the configuration file from the default ('knock -edit')"
-			echo ""
-			echo "Once updated, please run 'knock -start' to begin processing knocks"
-		fi
-	fi
-	exit
-fi
-
-if [ "$1" = "-start" ] || [ "$1" = "-restart" ]
-then
-	if [ ! -s "$cf" ]
-	then
-		_LogMsg_ "**ERROR**: Missing configuration file [$cf]" $pLogERROR
-		exit 1
-	fi
-
-	service restart_firewall >/dev/null
-	printf "\nStarting knock.sh background process. Please wait...\n"
-
-	if $sf "-screen"
-	then
-		if [ $# -lt 2 ] || [ -z "$2" ]
-		then
-			clear
-			banner
-			printf "\nKnock.sh has started and is ready for port knocks\n\n"
-			ShowConfig
-		else
-			printf "Knock.sh has started and is ready for port knocks\n"
-		fi
-	else
-		printf "\nERROR: Cannot start knock process in background\n\n"
-		exit 1
-	fi
-	exit
-fi
-
-if [ "$1" = "-stop" ]
-then
-	printf "\nStopping knock.sh background process. Please wait...\n"
-	/opt/sbin/screen -S knock -X quit >/dev/null
-	sleep 2  #Allow time to terminate process#
-
-	if [ $# -lt 2 ] || [ -z "$2" ]
-	then
-		clear
-		banner
-	fi
-	printf "Knock.sh background process stopped\n"
-	exit
-fi
-
-if [ "$1" = "-uninstall" ]; then
-	clear
-	banner
-	if ! promptyn "Proceed with uninstalling knock? (y/n):" ; then
-		echo ""
-		echo -e "\nExiting uninstallation"
-		exit
-	fi
-	echo ""
-
-	screen -S knock -X quit > /dev/null
-	sed -i -e '/knock.sh/d' $pm	#remove post-mount command
-	sed -i -e '/knock.sh/d' $fs	#remove firewall-start command
-	sed -i -e '/knock.sh/d' $pa	#remove profile.add command
-
-	service restart_firewall >/dev/null #Remove iptable modifications
-
-	rm $sf #Remove script file
-	cp $cf $tf #Save config in temp folder
-	rm $cf #Remove config fire
-	rm $vf 2> /dev/null #Remove version file
-	rm $df 2> /dev/null #Remove develop flag
-
-	#Attempt to remove installation directory
-	if [ $(pwd) = $id ]; then
-		echo "Error: cannot remove install directory" $id
-	else
-		rmdir $id 2>/dev/null
-	fi
-
-	echo ""
-	echo "Knock.sh uninstalled"
-	echo "Existing configuration file saved as" $tf
 	echo "Thanks for using knock.sh!"
 	exit
 fi
 
-if [ "$1" = "-develop" ]; then
-    touch $df
-	exit
-fi
 
-if [ "$1" = "-main" ]; then
-    rm $df 2> /dev/null
-	exit
-fi
-
-if [ "$1" = "amtmupdate" ]; then
-	if [ "$2" = "check" ]; then
-		exit 0
-	fi
-
-	if [ -f $df ]; then
-		giturl=$giturld
-	fi
-
-	echo -n "Running amtmupdate..."
-	rm $vf 2> /dev/null
-	curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/version.txt" -o $vf
-	if [ -f $vf ]; then
-		curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/knock.sh" -o $sf
-		$sf -install -force > /dev/null
-		$sf -start -nobanner > /dev/null
-		echo -e $cm
-		echo "amtmupdate completed."
-		exit 0
-	else
-		echo ""
-		echo "amtmupdate failed."
-		exit 1
-	fi
-fi
-
-if [ "$1" = "-update" ]; then
-	updatecommand
-	exit
-fi
-
-if [ "$1" = "-edit" ]; then
-	editcommand "-edit" $2
-	exit
-fi
-
-if [ "$1" != "-loop" ]
-then
+if [ "$1" != "-loop" ]; then
 	echo "Knock.sh: Router Commands for non-admin users"
 	echo "Version" $REV
 	echo ""
@@ -1436,163 +1221,98 @@ then
 	exit
 fi
 
-if [ ! -s "$cf" ]
-then
-	_LogMsg_ "**ERROR**: Missing configuration file [$cf]" $pLogERROR
+if [ ! -f $cf ]; then
+	echo "Error: Missing configuration file" $cf
+	logger -t "knock.sh" "Error: Missing configuration file" $cf
 	exit 1
 fi
 
-#----------------------------------------#
-# Modified by Martinski W. [2026-May-17] #
-#----------------------------------------#
-Read_DATA()
-{
-    local IFACE  SRCIP  MSGID  DPORT
-    local knockMsg="$(dmesg | grep -E '^knock.sh[[:blank:]]+' | tail -n1)"
-    if [ -z "$knockMsg" ] ; then echo ; return 1 ; fi
+function readDATA {
+	#Fix for missing "DF" flag
+	#dmesg | grep "knock.sh" | tail -n 1 | awk '{print $11 " " $15 " " $2}'; }
+	dmesg | grep "knock.sh" | tail -n 1 | awk '{print $11 " " $14 " " $15 " " $2}'; }
+function readID {
+	echo $DATA | awk '{print $1}' | awk -F '=' '{print $2}'; }
 
-    IFACE="$(echo "$knockMsg" | awk -v RS=' ' '{print}' | grep '^IN=')"
-    SRCIP="$(echo "$knockMsg" | awk -v RS=' ' '{print}' | grep '^SRC=')"
-    MSGID="$(echo "$knockMsg" | awk -v RS=' ' '{print}' | grep '^ID=')"
-    DPORT="$(echo "$knockMsg" | awk -v RS=' ' '{print}' | grep '^DPT=')"
-    echo "${MSGID:-ID=99999} ${DPORT:-DPT=0} ${IFACE:-IN=X} ${SRCIP:-SRC=Y}"
-}
-
-#----------------------------------------#
-# Modified by Martinski W. [2026-May-17] #
-#----------------------------------------#
-Read_ID()
-{
-    local msgID  numID
-    if [ -z "$kDATA" ] ; then echo ; return 1 ; fi
-
-    msgID="$(echo "$kDATA" | awk -v RS=' ' '{print}' | grep '^ID=')"
-    numID="$(echo "$msgID" | awk -F '=' '{print $2}')"
-
-    if [ $# -gt 0 ] && [ "$1" = "checkID" ] && [ "$numID" -eq 0 ]
-    then
-        #To handle ID field from iOS always being ZERO#
-        numID="$FAKE_NUMID"
-        echo "$FAKE_KMESG" >/dev/kmsg
-        _LogMsg_ "ID is ZERO. Adding fake kernel ring buffer message." NOECHO
-    fi 
-    echo "$numID"
-}
-
-#-----------------------------------------------#
-# Make sure ONLY one background loop is running
-#-----------------------------------------------#
-if ! _AcquireMutexFLock_
-then exit 1
-fi
-
-thePortNum=""
-thePortSeq=""
-srceIPaddr=""
-sleepDelayMIN=3
-delayINTERVAL=7
-isTwoPortSeqX=false
-
-kDATA="$(Read_DATA)"
-prevID="$(Read_ID checkID)"
-nextID="N/A"
+DATA=$(readDATA)
+oldID=$(readID)
 
 echo "Knock.sh started"
-echo "Version $REV"
-_LogMsg_ "Waiting for port knocks..."
+echo "Version" $REV
+echo "Waiting for port knocks..."
+logger -t "knock.sh" "Waiting for port knocks..."
 
-#----------------------------------------#
-# Modified by Martinski W. [2026-May-18] #
-#----------------------------------------#
-while true
-do
-    #For Quicker Response#
-    sleep "$sleepDelayMIN"
-    kDATA="$(Read_DATA)"
-    nextID="$(Read_ID)"
+#Fix Iphone ID always 0 issue
+if [ $oldID -eq 0 ]; then
+	logger -t "knock.sh" "IDs are zero. Adding fake kernel ring buffer message."
+	echo "knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID="$FAKE_ID >/dev/kmsg
+	oldID=$FAKE_ID
+fi
 
-    if [ -z "$nextID" ] || [ "$prevID" = "$nextID" ]
-    then continue
-    fi
+while sleep $INTERVAL;do
+	DATA=$(readDATA)
+	ID=$(readID)
 
-    kPORTx="$(echo "$kDATA" | awk '{print $2}' | awk -F '=' '{print $2}')"
-    kIFACE="$(echo "$kDATA" | awk '{print $3}' | awk -F '=' '{print $2}')"
-    kSRCIP="$(echo "$kDATA" | awk '{print $4}' | awk -F '=' '{print $2}')"
-    _LogMsg_ "Knock detected on interface $kIFACE into port $kPORTx with ID=[$nextID] from SRC=[$kSRCIP]"
+	if [ "$ID" != "$oldID" ]; then
+		#Fix for missing DF flag
+		#KPORT=$(echo $DATA | awk '{print $2}' | awk -F '=' '{print $2}')
+		if $(echo $DATA | grep -q "WINDOW");then
+			KPORT=$(echo $DATA | awk '{print $2}' | awk -F '=' '{print $2}')
+			DF="DF flag not set"
+		else
+			KPORT=$(echo $DATA | awk '{print $3}' | awk -F '=' '{print $2}')
+			DF=""
+		fi
+		#KINT=$(echo $DATA | awk '{print $3}' | awk -F '=' '{print $2}')
+		KINT=$(echo $DATA | awk '{print $4}' | awk -F '=' '{print $2}')
+		echo  "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID $DF
+		logger -t "knock.sh" "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID $DF
 
-    while read -r cfgLINE
-    do
-        if [ -z "$cfgLINE" ] || \
-           echo "$cfgLINE" | grep -qE "^[[:blank:]]*[#].*"
-        then continue  #Skip Line#
-        fi
-        thePORTx="$(echo "$cfgLINE" | awk -F' ' '{print $1}')"
-        theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
-        theCMDx="$(echo "$cfgLINE" | cut -d' ' -f3-)"
+		while read ports interfaces cmd
+		do
+			if [ -n "$ports" ] && [ $(echo $ports | cut -c 1-1) != "#" ]; then
+				port1=$(echo $ports | awk -F',' '{print $1}')
+				port2=$(echo $ports | awk -F',' '{print $2}')
+				if [ -n "$port2" ]; then
+					if [ "$KPORT" = "$port1" ]; then
+						echo "Starting port" $port1 "timer"
+						logger -t "knock.sh" "Starting port" $port1 "timer"
+						/opt/sbin/screen -S knock_$port1 -X quit > /dev/null
+						/opt/sbin/screen -dmS knock_$port1 sleep $DOUBLE_KNOCK_WAIT
+						#Change break to continue to fix doubleknock ignoring rest of commands
+						#break
+						continue
+					fi
+					if $(/opt/sbin/screen -ls knock_$port1 >/dev/null); then
+						echo "Port" $port1 "timer running"
+						logger -t "knock.sh" "Port" $port1 "timer running"
+						port=$port2
+					else
+						#Change break to continue to fix doubleknock ignoring rest of commands
+						#break
+						continue
+					fi
+				else
+					port=$port1
+				fi
+				if [ "$KPORT" = "$port" ]; then
+					echo "Executing command:" "$cmd"
+					logger -t "knock.sh" "Executing command:" "$cmd"
+					sh -c "eval $cmd &"
+				fi
+			fi
+		done < $cf
 
-        if [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
-        then
-            _LogMsg_ "**ERROR**: The port knock entry [$cfgLINE] is INVALID" $pLogERROR
-            continue
-        fi
-        portNum1="$(echo "$thePORTx" | awk -F',' '{print $1}')"
-        portNum2="$(echo "$thePORTx" | awk -F',' '{print $2}')"
+		sleep $INTERVAL
+		sleep $INTERVAL
+		DATA=$(readDATA)
+		oldID=$(readID)
 
-        if ! _ValidatePortNumber_ "$portNum1"
-        then
-            _LogMsg_ "*WARNING*: The port knock entry [$cfgLINE] is ignored" $pLogWARNG
-            continue
-        fi
-        thePortNum="$portNum1" ; thePortSeq="$portNum1"
-
-        if [ -n "$portNum2" ]
-        then
-            if ! _ValidatePortNumber_ "$portNum2"
-            then
-                _LogMsg_ "*WARNING*: The port knock entry [$cfgLINE] is ignored" $pLogWARNG
-                continue
-            fi
-            if [ "$kPORTx" = "$portNum1" ] || [ "$kPORTx" = "$portNum2" ]
-            then
-                thePortNum="" ; thePortSeq=""
-                if [ "$kPORTx" = "$portNum1" ]
-                then
-                    _LogMsg_ "Starting port $portNum1 timer"
-                    /opt/sbin/screen -S knock_$portNum1 -X quit > /dev/null
-                    /opt/sbin/screen -dmS knock_$portNum1 sleep $DOUBLE_KNOCK_WAIT
-                    srceIPaddr="$kSRCIP"
-                    isTwoPortSeqX=true
-                    break  #Get Next Port in the sequence#
-                fi
-                if [ "$kPORTx" = "$portNum2" ] && \
-                   [ "$kSRCIP" = "$srceIPaddr" ] && \
-                   $(/opt/sbin/screen -ls knock_$portNum1 >/dev/null)
-                then
-                    _LogMsg_ "Port $portNum1 timer running"
-                    /opt/sbin/screen -S knock_$portNum1 -X quit > /dev/null
-                    #Got Correct Port Sequence#
-                    thePortNum="$portNum2"
-                    thePortSeq="${portNum1},${portNum2}"
-                fi
-            fi
-        fi
-        if [ -n "$thePortNum" ] && [ "$kPORTx" = "$thePortNum" ]
-        then
-            srceIPaddr=""
-            isTwoPortSeqX=false
-            _LogMsg_ "Executing [ID=$nextID] CMD: [$theCMDx $thePortSeq]" $pLogWARNG
-            eval $theCMDx "$thePortSeq" &
-            thePortNum="" ; thePortSeq=""
-            break  #Get Next Port Knock#
-        fi
-    done < "$cf"
-
-    sleep "$delayINTERVAL"
-    # Get last retry entry #
-    kDATA="$(Read_DATA)"
-    prevID="$(Read_ID checkID)"
+		#Fix Iphone ID always 0 issue
+		if [ $oldID -eq 0 ]; then
+			logger -t "knock.sh" "IDs are zero. Adding fake kernel ring buffer message."
+			echo "knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID="$FAKE_ID >/dev/kmsg
+			oldID=$FAKE_ID
+		fi
+	fi
 done
-
-_ReleaseMutexFLock_
-
-#EOF#
