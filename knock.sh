@@ -68,6 +68,7 @@
 # - Prepare for Martinski merge
 #    - Added readonly to constants, quotes around string definitions, change function definition style, rearanged function order, renamed subroutines & variables
 # - Added min knock port, changed fake ID
+# - Added Martinski interactive test and logger
 
 readonly version=2.1.0
 readonly REV="$version"
@@ -78,6 +79,29 @@ readonly DOUBLE_KNOCK_WAIT=30
 #To handle ID field from iOS always being ZERO#
 readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
 readonly FAKE_KMESG="knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID=$FAKE_NUMID"
+# Give priority to built-in binaries #
+export PATH="/bin:/usr/bin:/sbin:/usr/sbin:$PATH"
+
+#-------------------------------------#
+# Added by Martinski W. [2026-May-17] #
+#-------------------------------------#
+readonly scriptFileName="${0##*/}"
+readonly scriptFNameTag="${scriptFileName%%.*}"
+readonly logTagStr="${scriptFNameTag}_[$$]"
+
+if [ -t 0 ] && ! tty | grep -qwi "NOT"
+then
+	readonly isInteractive=true
+	readonly stty_save="$(stty -g)"   #Save settings (e.g. blocking input)#
+else
+	readonly isInteractive=false
+fi
+
+if [ "$isInteractive" = "false" ] && { [ $# -eq 0 ] || [ -z "$1" ] ; }
+then
+	logger -st "$logTagStr" -p 3 "**ERROR**: CLI Menu is NOT available in a non-interactive shell"
+	exit 1
+fi
 
 fn="$(readlink -f "$0")"
 jf="/jffs"
@@ -101,8 +125,12 @@ unset LD_LIBRARY_PATH
 [ "$HOME" != "/root" ] && export HOME="/root"
 export SCREENDIR="${HOME}/.screen"
 
-stty_save=$(stty -g)					#Save tty settings (e.g. blocking input)
-trap CleanUp HUP INT QUIT TERM				#Trap exit to restore tty to normal
+#----------------------------------------#
+# Modified by Martinski W. [2026-May-17] #
+#----------------------------------------#
+#Trap exit to restore TTY#
+trap CleanUp HUP INT QUIT ABRT TERM
+
 #set -x
 
 function banner {
@@ -117,7 +145,9 @@ echo "                                          "
 #Trap exit to restore tty to normal#
 CleanUp()
 {
-	stty $stty_save
+	if [ -n "${stty_save:+Rung}" ]
+	then stty "$stty_save"
+	fi
 	clear
 	banner
 	printf "\nExiting...\n"
@@ -334,7 +364,9 @@ function refresh {
 
  done
 
- stty $stty_save	#Reset tty to original (e.g. blocking input)
+ if [ -n "${stty_save:+Rung}" ]
+ then stty "$stty_save"  #Reset to original (e.g. blocking input)#
+ fi
  return 0
 }
 ###############################################
@@ -722,6 +754,38 @@ function editcommand {
 	return
 }
 
+#-------------------------------------#
+# Added by Martinski W. [2026-May-18] #
+#-------------------------------------#
+readonly pLogALERT=1
+readonly pLogCRITC=2
+readonly pLogERROR=3
+readonly pLogWARNG=4
+readonly pLogNOTIC=5
+readonly pLogINFOR=6
+readonly CLEARct="\e[0m"
+readonly ERRORct="\e[1;31m"
+
+_LogMsg_()
+{
+    if [ $# -lt 1 ] || [ -z "$1" ]
+    then return 1
+    fi
+    if [ $# -lt 2 ] || [ -z "$2" ] || \
+       ! echo "$2" | grep -qE "^[1-6]$"
+    then logPrioNum="$pLogNOTIC"
+    else logPrioNum="$2"
+    fi
+    if "$isInteractive" && \
+       { [ $# -lt 2 ] || [ "$2" != "NOECHO" ] ; }
+    then
+        if [ "$logPrioNum" -gt "$pLogERROR" ]
+        then printf "${1}\n"
+        else printf "${ERRORct}${1}${CLEARct}\n"
+        fi
+    fi
+    logger -t "$logTagStr" -p $logPrioNum "$1"
+}
 ## Main Menu ##
 if [ $# -eq 0 ] || [ -z "$1" ]
 then
@@ -859,7 +923,7 @@ then
 
 	clear
 	banner
-	echo "Thanks for using knock.sh!"
+	printf "\nThanks for using knock.sh!\n\n"
 	exit
 fi
 
@@ -875,7 +939,7 @@ if [ "$1" = "-config" ]
 then
 	if [ ! -s "$cf" ]
 	then
-		echo "Error: Missing configuration file" $cf
+		_LogMsg_ "**ERROR**: Missing configuration file [$cf]" $pLogERROR
 		exit 1
 	fi
 	clear
@@ -888,16 +952,16 @@ if [ "$1" = "-screen" ]
 then
 	if [ ! -s "/opt/sbin/screen" ]
 	then
-		logger -t "knock.sh" "Error: Entware Screen app not installed"
+		_LogMsg_ "**ERROR**: Entware Screen app not installed" $pLogERROR
 		exit 1
 	fi
 	if [ ! -s "$sf" ]
 	then
-		logger -t "knock.sh" "Error: knock.sh not installed yet"
+		_LogMsg_ "**ERROR**: knock.sh is not installed yet" $pLogERROR
 		exit 1
 	fi
 
-	logger -t "knock.sh" "Starting knock.sh background process"
+	_LogMsg_ "Starting knock.sh background process" NOECHO
 
 	/opt/sbin/screen -S knock -X quit >/dev/null
 	sleep 3  #Allow time to terminate process#
@@ -910,11 +974,11 @@ if [ "$1" = "-firewall" ]
 then
 	if [ ! -s "$cf" ]
 	then
-		logger -t "knock.sh" "Error: Missing configuration file" $cf
+		_LogMsg_ "**ERROR**: Missing configuration file [$cf]" $pLogERROR
 		exit 1
 	fi
 
-	logger -t "knock.sh" "Adding knock ports to iptables"
+	_LogMsg_ "Adding port knocking rules to firewall"
 
 	while read thePORTS theIFACE cmd
 	do
@@ -977,7 +1041,7 @@ then
 		echo ""
 		echo -e "\nKnock.sh requires the Entware utility 'screen'"
 
-		if  promptyn "Proceed with installing 'screen'? (y/n):" ; then
+		if promptyn "Proceed with installing 'screen'? (y/n):" ; then
 			echo ""
 			opkg install screen
 			if [ ! -f "/opt/sbin/screen" ]; then
@@ -1103,7 +1167,7 @@ if [ "$1" = "-start" ] || [ "$1" = "-restart" ]
 then
 	if [ ! -s "$cf" ]
 	then
-		echo "Error: Missing configuration file" $cf
+		_LogMsg_ "**ERROR**: Missing configuration file [$cf]" $pLogERROR
 		exit 1
 	fi
 
@@ -1267,8 +1331,7 @@ fi
 
 if [ ! -s "$cf" ]
 then
-	echo "Error: Missing configuration file" $cf
-	logger -t "knock.sh" "Error: Missing configuration file" $cf
+	_LogMsg_ "**ERROR**: Missing configuration file [$cf]" $pLogERROR
 	exit 1
 fi
 
@@ -1288,8 +1351,7 @@ oldID=$(Read_ID)
 
 echo "Knock.sh started"
 echo "Version $REV"
-echo "Waiting for port knocks..."
-logger -t "knock.sh" "Waiting for port knocks..."
+_LogMsg_ "Waiting for port knocks..."
 
 #Fix Iphone ID always 0 issue
 if [ $oldID -eq 0 ]; then
