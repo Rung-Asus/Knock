@@ -40,7 +40,9 @@
 #Many thanks to @Viktor Jaep for all his help, input and testing of this script!
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
-# Last Updated: 19MAY2026
+#-----------------------------------------------------------------------
+# Last Updated: 28MAY2026
+########################################################################
 
 #Update Log:
 # 1.3
@@ -62,24 +64,32 @@
 # 2.0.2
 # - Fix for double knock early exit bug
 # - Fix for packets without DF flag set
+# 2.1.0
+# - Prepare for Martinski merge
+#    - Added readonly to constants, quotes around string definitions, change function definition style, rearanged function order, renamed subroutines & variables
+# - Added min knock port, changed fake ID
 
-version=2.0.2
-REV=$version
-INTERVAL=5
-DOUBLE_KNOCK_WAIT=30
-FAKE_ID=44444
+readonly version=2.1.0
+readonly REV="$version"
+readonly INTERVAL=5
+readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
+readonly DOUBLE_KNOCK_WAIT=30
 
-fn=$(readlink -f "$0")
+#To handle ID field from iOS always being ZERO#
+readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
+readonly FAKE_KMESG="knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID=$FAKE_NUMID"
+
+fn="$(readlink -f "$0")"
 jf="/jffs"
-id=$jf"/addons/knock.d"
-cf=$id"/knock.cfg"
+id="${jf}/addons/knock.d"
+cf="${id}/knock.cfg"
 tf="/tmp/knock.cfg"
-vf=$id"/version.txt"
-js=$jf"/scripts"
-sf=$js"/knock.sh"
-pm=$js"/post-mount"
-fs=$js"/firewall-start"
-pa=$jf"/configs/profile.add"
+vf="${id}/version.txt"
+js="${jf}/scripts"
+sf="${js}/knock.sh"
+pm="${js}/post-mount"
+fs="${js}/firewall-start"
+pa="${jf}/configs/profile.add"
 giturl="https://raw.githubusercontent.com/Rung-Asus/Knock/main"
 giturld="https://raw.githubusercontent.com/Rung-Asus/Knock/develop"
 df=$id/"develop"
@@ -92,7 +102,7 @@ unset LD_LIBRARY_PATH
 export SCREENDIR="${HOME}/.screen"
 
 stty_save=$(stty -g)					#Save tty settings (e.g. blocking input)
-trap cleanup HUP INT QUIT TERM				#Trap exit to restore tty to normal
+trap CleanUp HUP INT QUIT TERM				#Trap exit to restore tty to normal
 #set -x
 
 function banner {
@@ -104,12 +114,13 @@ echo "|_|\_\|_| |_|\___/ \___|_|\_\(_)___/_| |_| v"$REV
 echo "                                          "
 }
 
-function cleanup {
-#Trap exit to restore tty to normal
+#Trap exit to restore tty to normal#
+CleanUp()
+{
 	stty $stty_save
 	clear
 	banner
-	echo -e "\nExiting..."
+	printf "\nExiting...\n"
 	exit 1
 }
 
@@ -328,18 +339,21 @@ function refresh {
 }
 ###############################################
 
-function promptyn {
+promptyn()
+{
 	#Y/N prompt (credit Tailmon.sh)
 	while true; do
-		read -p "$1" -n 1 -r yn
+		read -p "$1 " -n 1 -r yn
 		case "${yn}" in
 			[Yy]* ) return 0 ;;
 			[Nn]* ) return 1 ;;
 			* ) echo -e "\nPlease answer y or n.";;
 		esac
-	done }
+	done
+}
 
-function checkinstall {
+CheckInstall()
+{
 	#Verify everything is in its place
 	[ -f $sf ] || return 1
 	[ -f "/opt/sbin/screen" ] || return 1
@@ -350,46 +364,496 @@ function checkinstall {
 	$(grep -q "knock.sh" $fs) || return 1
 	[ -f $pa ] || return 1
 	$(grep -q "knock.sh" $pa) || return 1
-	return 0; }
+	return 0
+}
 
+#Verify knock rules are in firewall and knock.sh is running#
+CheckStatus()
+{
+	iptables -L INPUT | grep -q '\bknock.sh' || return 1
+	/opt/sbin/screen -ls knock >/dev/null || return 1
+	return 0
+}
 
-function runstatus {
-	#Verify knock rules are in iptables and knock.sh is running
-	$(iptables -L INPUT | grep -q "knock.sh") || return 1
-	$(/opt/sbin/screen -ls knock >/dev/null )  || return 1
-	return 0; }
-
-
-function showstatus {
-	dashes=$(head -c 48 < /dev/zero | tr '\0' '-')
-	echo $dashes
+ShowStatus()
+{
+	dashes="$(head -c 48 < /dev/zero | tr '\0' '-')"
+	echo "$dashes"
 	echo -e "| Knock.sh: Router Commands for non-admin users\t|"
-	echo $dashes
-	checkinstall && echo -e "| Install Status: Installed\t\t\t|" || echo -e "| Install Status: Knock not properly installed!\t|"
-	echo $dashes
-	runstatus && echo -e "|     Run Status: Running & waiting for knocks\t|" || echo -e "|     Run Status: Knock STOPPED\t\t\t|"
-	echo $dashes
+	echo "$dashes"
+	CheckInstall && echo -e "| Install Status: Installed\t\t\t|" || echo -e "| Install Status: Knock not properly installed!\t|"
+	echo "$dashes"
+	CheckStatus && echo -e "|     Run Status: Running & waiting for knocks\t|" || echo -e "|     Run Status: Knock STOPPED\t\t\t|"
+	echo "$dashes"
 	return
 }
 
-if [ "$1" = "-status" ]; then
+function updatecommand {
+	clear
+	banner
+
+	if [ -f $df ]; then
+		echo "On develop branch."
+		giturl=$giturld
+	fi
+
+	rm $vf 2>/dev/null
+	curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/version.txt" -o $vf
+	if [ -f $vf ]; then
+		nv=$(cat $vf | head -n 1)
+		echo "Latest version:" $nv
+		echo "Current version:" $REV
+		if promptyn "Proceed with update? (y/n):" ; then
+			echo -e "\nDownloading..."
+			curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/knock.sh" -o $sf
+			chmod 755 $sf
+			echo "Installing..."
+			$sf -install -force
+			echo "Restarting..."
+			$sf -start -nobanner
+			echo "Update completed."
+			echo ""
+			echo -e "Knock version:\t"$REV
+			ShowStatus
+			echo ""
+			ShowConfig
+		else
+			echo -e "\nNo update performed"
+			return 1
+		fi
+	else
+		echo "Error: network issue"
+		return 1
+	fi
+	return 0
+}
+
+function editcommand {
+	function editknockentry {
+		#Edit comment
+		st="$comment"
+		header="     Comment:"
+		editline
+		comment="$st"
+
+		#Edit ports
+		st=$ports
+		header="     Port(s):"
+		editline
+		st=${st// /}
+		allgood=1
+		for port in ${st//,/ }
+		do
+			if echo "$port" | grep -qE "^[1-9][0-9]{3,4}$" && \
+			   [ "$port" -ge "$MIN_KNOCK_PORT" ] && [ "$port" -le 65535 ]
+			then
+				continue
+			else
+				allgood=0
+			fi
+		done
+		if [ $allgood -eq 1 ]; then
+			ports=$st
+		else
+			echo "Error! '"$st"' is an invalid port list. Changes not saved."
+		fi
+
+		#Edit interfaces
+		st=$interfaces
+		header="Interface(s):"
+		editline
+		st=${st// /}
+		allgood=1
+		for interface in ${st//,/ }; do
+			$(ifconfig $interface >/dev/null 2>&1) || allgood=0
+		done
+		if [ $allgood -eq 1 ]; then
+			interfaces=$st
+		else
+			echo "Error! '"$st"' is an invalid interface list. Changes not saved."
+		fi
+
+		#Edit command
+		st="$cmd"
+		header="     Command:"
+		editline
+		cmd="$st"
+	}
+
+	#Read configuration file into virtual array
+	lastComment=""
+	commandNum=0
+	updated=0
+	while read ports interfaces cmd; do
+		if [ -n "$ports" ]; then
+			if [ $(echo $ports | cut -c 1-1) != "#" ]; then
+				#Not a command line
+				commandNum=$((commandNum+1))
+
+				#Load data into pseudo array
+				eval comment$commandNum=\"$lastComment\"
+				eval ports$commandNum=\"$ports\"
+				eval interfaces$commandNum=\"$interfaces\"
+				eval cmd$commandNum=\"$cmd\"
+			else
+				#Commment line
+				lastComment=$(echo "$ports $interfaces $cmd" | cut -c 2-)
+			fi
+		fi
+	done < $cf
+	commandcount=$commandNum
+
+	#Edit menu loop
+	while [ true ]; do
+		clear
+		cols=$(stty size | awk '{print $2}') #Console width
+		dashes=$(head -c $cols < /dev/zero | tr '\0' '-')
+		{
+			echo -e "The following ports/interfaces will execute these router commands:\n"
+			commandNum=0
+
+			#Display virtual array
+			while [ $commandNum -lt $commandcount ]; do
+				commandNum=$((commandNum+1))
+				echo $dashes
+				echo "Command #" $commandNum
+				comment="$(eval echo \"\$comment$commandNum\")"
+				ports=$(eval echo \"\$ports$commandNum\")
+				interfaces=$(eval echo \"\$interfaces$commandNum\")
+				cmd=$(eval echo \"\$cmd$commandNum\")
+
+				echo -en "\t"
+				echo $comment
+				echo -e "\tPort" $ports "on" $interfaces
+				echo -en "\t"
+				echo "Command:" "$cmd"
+				interface=$(echo $interfaces | awk -F',' '{print $1}')
+
+				#Display URLs (if valid interface)
+				if  $(ifconfig $interface >/dev/null 2>&1); then
+					port1=$(echo $ports | awk -F',' '{print $1}')
+					echo -e "\tURL to initiate command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port1
+					port2=$(echo $ports | awk -F',' '{print $2}')
+					if [ -n "$port2" ]; then
+						echo -e "\t\tWait" $((INTERVAL * 3)) "seconds then URL to complete command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port2
+					fi
+				else
+					echo $interface "is an invalid interface!"
+				fi
+				echo ""
+			done
+			echo $dashes
+		} > /tmp/knock.txt
+
+		more /tmp/knock.txt #Using "more" command for long config files
+
+		read -p "(E)dit command, (A)dd command, (D)elete command, or (Q)uit editing? (e,a,d,q): " SelectEdit
+
+		case $SelectEdit in
+		 [Aa])
+			#Add command
+			commandNum=$commandcount
+			comment="Example comment"
+			ports=44444
+			interfaces="br0"
+			cmd="ls #example command"
+			if [ $commandNum -ne 0 ]; then
+				ports=$(eval echo \"\$ports$commandNum\")
+				ports=$((ports+1))
+				comment="$(eval echo \"\$comment$commandNum\")"
+				interfaces=$(eval echo \"\$interfaces$commandNum\")
+				cmd=$(eval echo \"\$cmd$commandNum\")
+			fi
+			commandNum=$((commandNum+1))
+			commandcount=$commandNum
+
+			echo "Adding new Command #" $commandNum
+			echo ""
+			editknockentry
+			echo ""
+			echo -n "Save changes to port knock entry? (y=Yes, n=No):"
+			if promptyn ' ' ; then
+				eval comment$commandNum=\"$comment\"
+				eval ports$commandNum=\"$ports\"
+				eval interfaces$commandNum=\"$interfaces\"
+				eval cmd$commandNum=\"$cmd\"
+				updated=1
+			else
+				commandcount=$((commandcount-1))
+			fi
+			;;
+
+		 [Dd])
+			#Delete command
+			while [ true ]; do
+				echo ""
+				echo -n "Enter command number to delete (1 to" $commandcount"): "
+				read -p "" commandNum
+				if [ $commandNum -gt 0 -a $commandNum -le $commandcount ] 2>/dev/null; then
+					break
+				fi
+			done
+			echo ""
+			echo -n "Delete knock entry #" $commandNum "? (y=Yes, n=No): "
+			if promptyn ' ' ; then
+				while [ $commandNum -lt $commandcount ]; do
+					commandnumold=$((commandNum+1))
+					comment="$(eval echo \"\$comment$commandnumold\")"
+					ports=$(eval echo \"\$ports$commandnumold\")
+					interfaces=$(eval echo \"\$interfaces$commandnumold\")
+					cmd=$(eval echo \"\$cmd$commandnumold\")
+					eval comment$commandNum=\"$comment\"
+					eval ports$commandNum=\"$ports\"
+					eval interfaces$commandNum=\"$interfaces\"
+					eval cmd$commandNum=\"$cmd\"
+
+					commandNum=$commandnumold
+				done
+				commandcount=$((commandcount-1))
+				updated=1
+			fi
+			;;
+
+		 [Ee])
+			#Edit command
+			while [ true ]; do
+				echo ""
+				echo -n "Enter command number to edit (1 to" $commandcount"): "
+				read -p "" commandNum
+				if [ $commandNum -gt 0 -a $commandNum -le $commandcount ] 2>/dev/null; then
+					break
+				fi
+			done
+			comment="$(eval echo \"\$comment$commandNum\")"
+			ports=$(eval echo \"\$ports$commandNum\")
+			interfaces=$(eval echo \"\$interfaces$commandNum\")
+			cmd=$(eval echo \"\$cmd$commandNum\")
+			clear
+			echo "Editing Command #" $commandNum
+			echo ""
+			echo -en "\t"
+			echo $comment
+			echo -en "\t"
+			echo "Port" $ports "on" $interfaces
+			echo -en "\t"
+			echo "Command:" "$cmd"
+			echo $dashes
+			echo ""
+			editknockentry
+			echo -n "Save changes to port knock entry? (y=Yes, n=No):"
+			if promptyn ' ' ; then
+				eval comment$commandNum=\"$comment\"
+				eval ports$commandNum=\"$ports\"
+				eval interfaces$commandNum=\"$interfaces\"
+				eval cmd$commandNum=\"$cmd\"
+				updated=1
+			fi
+			;;
+
+		 [Qq]) break;;
+		esac
+	done
+
+	echo ""
+	if [ $updated -eq 1 ]; then
+		echo -n "Save changes to config file? (y=Yes, n=No):"
+		if promptyn ' ' ; then
+			echo -en "\nSaving configuration"
+
+			echo "#knock.sh configuration file" > $cf
+			echo -e "\n#Format Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]\n" >> $cf
+
+			#Write virtual array back to config file
+			commandNum=0
+			while [ $commandNum -lt $commandcount ]; do
+				commandNum=$((commandNum+1))
+				echo -n "..."$commandNum
+				echo "$(eval echo \"#\$comment$commandNum\")" >> $cf
+				echo $(eval echo \"\$ports$commandNum \$interfaces$commandNum \$cmd$commandNum\") >> $cf
+				echo "" >> $cf
+			done
+			echo -e "\n\nNew config file:"
+			echo $dashes
+			more $cf
+			echo $dashes
+			echo -n "Press any key to continue..."
+			read -n 1 -r yn
+			echo ""
+		else
+			echo ""
+		fi
+	fi
+
+	if [ $# -lt 2 ] || [ -z "$2" ]
+	then
 		clear
 		banner
-		showstatus
-		exit
+		echo "Thanks for using knock.sh!"
+	fi
+	return
+}
+
+## Main Menu ##
+if [ $# -eq 0 ] || [ -z "$1" ]
+then
+	while true
+	do
+		clear
+		banner
+		ShowStatus
+
+		echo ""
+		echo "Main Menu"
+		echo "========="
+		echo ""
+		echo "1. Install/reinstall knock.sh"
+		echo "2. Uninstall knock.sh"
+		if CheckInstall ; then
+			echo "3. Display knock.sh config file"
+			echo "4. Start/restart knock.sh background process"
+			echo "5. Stop knock.sh background process"
+			echo "6. Edit knock.sh config file"
+			echo "7. Update script to latest version"
+		fi
+		echo ""
+		echo "e. Exit"
+		echo ""
+
+		read -p "Enter selection: " SelectMenu
+
+		case $SelectMenu in
+
+		 [1])
+			sh $sf -install -force
+			sh $sf -stop -nobanner > /dev/null
+
+			if CheckInstall ; then
+				if [ -f $tf ]; then
+					echo -ne "\t"
+					if  promptyn "Restore saved config file ("$tf")? (y/n):" ; then
+						echo -en "\n\tRestoring saved file..."
+						cp $tf $cf
+						echo -e $cm
+					else
+						echo -e "\n\tKeeping default file."
+					fi
+				fi
+				echo ""
+				echo "Knock.sh Rev" $REV "successfully installed!"
+				echo ""
+				if  promptyn "Would you like to edit the config file now ("$cf")? (y/n):" ; then
+					echo ""
+					sh $sf -edit -nobanner
+					if  promptyn "Are you ready to start processing knocks (start knock.sh)? (y/n):" ; then
+						echo ""
+						sh $sf -start -nobanner
+					else
+						echo ""
+						echo "When ready, please run start from main menu"
+					fi
+				else
+					echo ""
+					echo "Please edit the configuration file from main menu"
+					echo ""
+					echo "Once updated, please run choose start from the main menu to begin processing knocks"
+				fi
+			fi
+
+
+			echo -n "Press any key to continue..."
+			read -n 1 -r yn
+			echo ""
+			exec $sf
+			exit
+			;;
+		 [2])
+			sh $sf -uninstall
+			exit;;
+
+
+		 [Ee]) break;;
+		esac
+
+		if CheckInstall ; then
+			case $SelectMenu in
+
+		 	 [3])
+				$sf -config
+				echo -n "Press any key to continue..."
+				read -n 1 -r yn
+				echo ""
+				;;
+			 [4])
+				$sf -start -nobanner
+				echo -n "Press any key to continue..."
+				read -n 1 -r yn
+				echo ""
+				;;
+			 [5])
+				$sf -stop -nobanner
+				echo -n "Press any key to continue..."
+				read -n 1 -r yn
+				echo ""
+				;;
+			 [6])
+				editcommand -edit -nobanner
+				if [ $updated -eq 1 ]; then
+					if  promptyn "Are you ready to start processing knocks (start knock.sh)? (y/n):" ; then
+						echo ""
+						$sf -start -nobanner
+					else
+						echo ""
+						$sf -stop -nobanner
+					fi
+				fi
+				echo -n "Press any key to continue..."
+				read -n 1 -r yn
+				echo ""
+				;;
+			 [7])
+				if updatecommand; then
+					echo -n "Press any key to restart knock.sh..."
+					read -n 1 -r yn
+					echo ""
+					clear
+					exec $sf
+					exit
+				else
+					echo -n "Press any key to continue..."
+					read -n 1 -r yn
+					echo ""
+				fi
+				;;
+			esac
+		fi
+	done
+
+	clear
+	banner
+	echo "Thanks for using knock.sh!"
+	exit
 fi
 
-function showconfig {
+if [ "$1" = "-status" ]
+then
+    clear
+    banner
+    ShowStatus
+    exit
+fi
+
+ShowConfig()
+{
 	echo -e "The following ports/interfaces will execute these router commands:\n"
-	lastcomment=""
-	commandnum=0
+	lastComment=""
+	commandNum=0
 	while read ports interfaces cmd
 	do
 		if [ -n "$ports" ]; then
 			if [ $(echo $ports | cut -c 1-1) != "#" ]; then
-				commandnum=$(($commandnum+1))
-				echo "Command #" $commandnum
-				echo -e "\t"$lastcomment
+				commandNum=$(($commandNum+1))
+				echo "Command #" $commandNum
+				echo -e "\t"$lastComment
 				echo -e "\tPort(s)" $ports "on" $interfaces
 				echo -e "\tCommand:" "$cmd"
 				interface=$(echo $interfaces | awk -F',' '{print $1}')
@@ -401,72 +865,84 @@ function showconfig {
 				fi
 				echo -e ""
 			else
-				lastcomment=$(echo "$ports $interfaces $cmd" | cut -c 2-)
+				lastComment=$(echo "$ports $interfaces $cmd" | cut -c 2-)
 			fi
 		fi
-	done < $cf
+	done < "$cf"
 }
 
-if [ "$1" = "-config" ]; then
-	if [ ! -f $cf ]; then
+if [ "$1" = "-config" ]
+then
+	if [ ! -s "$cf" ]
+	then
 		echo "Error: Missing configuration file" $cf
 		exit 1
 	fi
 	clear
 	banner
-	showconfig
+	ShowConfig
 	exit
 fi
 
-if [ "$1" = "-screen" ]; then
-	if [ ! -f "/opt/sbin/screen" ]; then
+if [ "$1" = "-screen" ]
+then
+	if [ ! -s "/opt/sbin/screen" ]
+	then
 		logger -t "knock.sh" "Error: Entware Screen app not installed"
 		exit 1
 	fi
-	if [ ! -f $sf ]; then
+	if [ ! -s "$sf" ]
+	then
 		logger -t "knock.sh" "Error: knock.sh not installed yet"
 		exit 1
 	fi
 
 	logger -t "knock.sh" "Starting knock.sh background process"
 
-	/opt/sbin/screen -S knock -X quit > /dev/null
+	/opt/sbin/screen -S knock -X quit >/dev/null
+	sleep 3  #Allow time to terminate process#
 	/opt/sbin/screen -dmS knock "$sf" -loop
-	sleep 4  #wait for any aborts
-	runstatus && exit 0 || exit 1
+	sleep 4  #Wait for any aborts#
+	CheckStatus && exit 0 || exit 1
 fi
 
-if [ "$1" = "-firewall" ]; then
-	if [ ! -f $cf ]; then
+if [ "$1" = "-firewall" ]
+then
+	if [ ! -s "$cf" ]
+	then
 		logger -t "knock.sh" "Error: Missing configuration file" $cf
 		exit 1
 	fi
 
 	logger -t "knock.sh" "Adding knock ports to iptables"
 
-	while read ports interfaces cmd
+	while read thePORTS theIFACE cmd
 	do
-		if [ -n "$ports" ] && [ $(echo $ports | cut -c 1-1) != "#" ]; then
+		if [ -n "$thePORTS" ] && [ $(echo $thePORTS | cut -c 1-1) != "#" ]; then
 			COUNT=0
-			for port in $(echo $ports | tr ',' ' '); do
-				COUNT=$(($COUNT+1))
-				if [ $COUNT -gt 2 ]; then
+			for port in $(echo "$thePORTS" | tr ',' ' ')
+			do
+				COUNT="$((COUNT + 1))"
+				if [ "$COUNT" -gt 2 ]
+				then
 					break
 				fi
-				for interface in $(echo $interfaces | tr ',' ' '); do
-					iptables -D INPUT -i $interface -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info 2> /dev/null
-					iptables -I INPUT -i $interface -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info
+				for IFace in $(echo "$theIFACE" | tr ',' ' ')
+				do
+					iptables -D INPUT -i $IFace -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info 2> /dev/null
+					iptables -I INPUT -i $IFace -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info
 				done
 			done
 		fi
-	done < $cf
+	done < "$cf"
 
 	exit
 fi
 
-if [ "$1" = "-install" ]; then
-
-	if [ "$2" = "" ]; then
+if [ "$1" = "-install" ]
+then
+	if [ $# -lt 2 ] || [ -z "$2" ]
+	then
 		clear
 		banner
 		if ! promptyn "Proceed with installing knock? (y/n):" ; then
@@ -478,9 +954,10 @@ if [ "$1" = "-install" ]; then
 		echo "Installing knock.sh..."
 	fi
 
-	#Check run location
-	if [ "$fn" != "$sf" ]; then
-		echo "Error: This script must be run from" $js
+	#Check run location#
+	if [ "$(dirname "$fn")" != "$js" ]
+	then
+		echo "Error: This script must be run from $js"
 		exit 1
 	fi
 	chmod 755 $sf
@@ -552,11 +1029,12 @@ EOF
 
 		echo -e $cm
 
-		if [ "$2" = "" ]; then
-		 #Optionally restore saved config file, if it exists
+		if [ $# -lt 2 ] || [ -z "$2" ]
+		then
+		    #Optionally restore saved config file, if it exists
 		 if [ -f $tf ]; then
 			echo -ne "\t"
-			if  promptyn "Restore saved config file ("$tf")? (y/n):" ; then
+			if promptyn "Restore saved config file ("$tf")? (y/n):" ; then
 				echo -en "\n\tRestoring saved file..."
 				cp $tf $cf
 				echo -e $cm
@@ -580,7 +1058,7 @@ EOF
 
 	#Add firewall-start command
 	echo -ne "\tUpdating firewall-start file..."
-	if ! [ -f $fs ]; then
+	if [ ! -f $fs ]; then
 		echo "#!/bin/sh" > $fs
       		echo "" >> $fs
 		chmod 755 $fs
@@ -598,14 +1076,15 @@ EOF
 	echo "alias knock=\"sh" $sf"\" # Added by knock.sh" >> $pa
 	echo -e $cm
 
-	if [ "$2" = "" ]; then
+	if [ $# -lt 2 ] || [ -z "$2" ]
+	then
 		echo ""
 		echo "Knock.sh Rev" $REV "successfully installed!"
 		echo ""
-		if  promptyn "Would you like to edit the config file now ("$cf")? (y/n):" ; then
-			echo ""
+		if promptyn "Would you like to edit the config file now ("$cf")? (y/n):" ; then
+			echo
 			$sf -edit -nobanner
-			if  promptyn "Are you ready to start processing knocks (start knock.sh)? (y/n):" ; then
+			if promptyn "Are you ready to start processing knocks (start knock.sh)? (y/n):" ; then
 				echo ""
 				$sf -start
 			else
@@ -620,43 +1099,51 @@ EOF
 	exit
 fi
 
-if [ "$1" = "-start" ] || [ "$1" = "-restart" ]; then
-	if [ ! -f $cf ]; then
+if [ "$1" = "-start" ] || [ "$1" = "-restart" ]
+then
+	if [ ! -s "$cf" ]
+	then
 		echo "Error: Missing configuration file" $cf
 		exit 1
 	fi
 
 	service restart_firewall >/dev/null
+	printf "\nStarting knock.sh background process. Please wait...\n"
 
-	echo "Starting knock.sh background process..."
-
-	if $sf "-screen"; then
-		if [ "$2" = "" ]; then
+	if $sf "-screen"
+	then
+		if [ $# -lt 2 ] || [ -z "$2" ]
+		then
 			clear
 			banner
-			echo "Knock.sh started and ready for port knocks"
-			echo ""
-			showconfig
+			printf "\nKnock.sh has started and is ready for port knocks\n\n"
+			ShowConfig
+		else
+			printf "Knock.sh has started and is ready for port knocks\n"
 		fi
 	else
-		echo "Error: Cannot start knock in background"
+		printf "\nERROR: Cannot start knock process in background\n\n"
 		exit 1
 	fi
 	exit
 fi
 
-if [ "$1" = "-stop" ]; then
-	screen -S knock -X quit > /dev/null
-	if [ "$2" = "" ]; then
+if [ "$1" = "-stop" ]
+then
+	printf "\nStopping knock.sh background process. Please wait...\n"
+	/opt/sbin/screen -S knock -X quit >/dev/null
+	sleep 2  #Allow time to terminate process#
+
+	if [ $# -lt 2 ] || [ -z "$2" ]
+	then
 		clear
 		banner
 	fi
-	echo "knock.sh stopped"
+	printf "Knock.sh background process stopped\n"
 	exit
 fi
 
 if [ "$1" = "-uninstall" ]; then
-
 	clear
 	banner
 	if ! promptyn "Proceed with uninstalling knock? (y/n):" ; then
@@ -666,7 +1153,7 @@ if [ "$1" = "-uninstall" ]; then
 	fi
 	echo ""
 
-	screen -S knock -X quit > /dev/null
+	screen -S knock -X quit >/dev/null
 	sed -i -e '/knock.sh/d' $pm	#remove post-mount command
 	sed -i -e '/knock.sh/d' $fs	#remove firewall-start command
 	sed -i -e '/knock.sh/d' $pa	#remove profile.add command
@@ -676,8 +1163,8 @@ if [ "$1" = "-uninstall" ]; then
 	rm $sf #Remove script file
 	cp $cf $tf #Save config in temp folder
 	rm $cf #Remove config fire
-	rm $vf 2> /dev/null #Remove version file
-	rm $df 2> /dev/null #Remove develop flag
+	rm $vf 2>/dev/null #Remove version file
+	rm $df 2>/dev/null #Remove develop flag
 
 	#Attempt to remove installation directory
 	if [ $(pwd) = $id ]; then
@@ -694,12 +1181,12 @@ if [ "$1" = "-uninstall" ]; then
 fi
 
 if [ "$1" = "-develop" ]; then
-        touch $df
+	touch $df
 	exit
 fi
 
 if [ "$1" = "-main" ]; then
-        rm $df 2> /dev/null
+	rm $df 2>/dev/null
 	exit
 fi
 
@@ -713,12 +1200,12 @@ if [ "$1" = "amtmupdate" ]; then
 	fi
 
 	echo -n "Running amtmupdate..."
-	rm $vf 2> /dev/null
+	rm $vf 2>/dev/null
 	curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/version.txt" -o $vf
 	if [ -f $vf ]; then
 		curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/knock.sh" -o $sf
-		$sf -install -force > /dev/null
-		$sf -start -nobanner > /dev/null
+		$sf -install -force >/dev/null
+		$sf -start -nobanner >/dev/null
 		echo -e $cm
 		echo "amtmupdate completed."
 		exit 0
@@ -727,463 +1214,20 @@ if [ "$1" = "amtmupdate" ]; then
 		echo "amtmupdate failed."
 		exit 1
 	fi
-
 fi
-
-function updatecommand {
-	clear
-	banner
-
-	if [ -f $df ]; then
-		echo "On develop branch."
-		giturl=$giturld
-	fi
-
-	rm $vf 2> /dev/null
-	curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/version.txt" -o $vf
-	if [ -f $vf ]; then
-		nv=$(cat $vf | head -n 1)
-		echo "Latest version:" $nv
-		echo "Current version:" $REV
-		if  promptyn "Proceed with update? (y/n):" ; then
-			echo -e "\nDownloading..."
-			curl --silent --retry 3 --connect-timeout 3 --max-time 6 --retry-delay 1 --retry-all-errors --fail $giturl"/knock.sh" -o $sf
-			chmod 755 $sf
-			echo "Installing..."
-			$sf -install -force
-			echo "Restarting..."
-			$sf -start -nobanner
-			echo "Update completed."
-			echo ""
-			echo -e "Knock version:\t"$REV
-			showstatus
-			echo ""
-			showconfig
-		else
-			echo -e "\nNo update performed"
-			return 1
-		fi
-	else
-		echo "Error: network issue"
-		return 1
-	fi
-	return 0
-}
 
 if [ "$1" = "-update" ]; then
 	updatecommand
 	exit
 fi
 
-function editcommand {
-	function editknockentry {
-		#Edit comment
-		st="$comment"
-		header="     Comment:"
-		editline
-		comment="$st"
-
-		#Edit ports
-		st=$ports
-		header="     Port(s):"
-		editline
-		st=${st// /}
-		allgood=1
-		for port in ${st//,/ }; do
-			if [ $port -gt 0 -a $port -le 65535 ] 2> /dev/null; then
-				continue
-			else
-				allgood=0
-			fi
-		done
-		if [ $allgood -eq 1 ]; then
-			ports=$st
-		else
-			echo "Error! '"$st"' is an invalid port list. Changes not saved."
-		fi
-
-		#Edit interfaces
-		st=$interfaces
-		header="Interface(s):"
-		editline
-		st=${st// /}
-		allgood=1
-		for interface in ${st//,/ }; do
-			$(ifconfig $interface >/dev/null 2>&1) || allgood=0
-		done
-		if [ $allgood -eq 1 ]; then
-			interfaces=$st
-		else
-			echo "Error! '"$st"' is an invalid interface list. Changes not saved."
-		fi
-
-		#Edit command
-		st="$cmd"
-		header="     Command:"
-		editline
-		cmd="$st"
-	}
-
-	#Read configuration file into virtual array
-	lastcomment=""
-	commandnum=0
-	updated=0
-	while read ports interfaces cmd; do
-		if [ -n "$ports" ]; then
-			if [ $(echo $ports | cut -c 1-1) != "#" ]; then
-				#Not a command line
-				commandnum=$((commandnum+1))
-
-				#Load data into pseudo array
-				eval comment$commandnum=\"$lastcomment\"
-				eval ports$commandnum=\"$ports\"
-				eval interfaces$commandnum=\"$interfaces\"
-				eval cmd$commandnum=\"$cmd\"
-			else
-				#Commment line
-				lastcomment=$(echo "$ports $interfaces $cmd" | cut -c 2-)
-			fi
-		fi
-	done < $cf
-	commandcount=$commandnum
-
-	#Edit menu loop
-	while [ true ]; do
-		clear
-		cols=$(stty size | awk '{print $2}') #Console width
-		dashes=$(head -c $cols < /dev/zero | tr '\0' '-')
-		{
-			echo -e "The following ports/interfaces will execute these router commands:\n"
-			commandnum=0
-
-			#Display virtual array
-			while [ $commandnum -lt $commandcount ]; do
-				commandnum=$((commandnum+1))
-				echo $dashes
-				echo "Command #" $commandnum
-				comment="$(eval echo \"\$comment$commandnum\")"
-				ports=$(eval echo \"\$ports$commandnum\")
-				interfaces=$(eval echo \"\$interfaces$commandnum\")
-				cmd=$(eval echo \"\$cmd$commandnum\")
-
-				echo -en "\t"
-				echo $comment
-				echo -e "\tPort" $ports "on" $interfaces
-				echo -en "\t"
-				echo "Command:" "$cmd"
-				interface=$(echo $interfaces | awk -F',' '{print $1}')
-
-				#Display URLs (if valid interface)
-				if  $(ifconfig $interface >/dev/null 2>&1); then
-					port1=$(echo $ports | awk -F',' '{print $1}')
-					echo -e "\tURL to initiate command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port1
-					port2=$(echo $ports | awk -F',' '{print $2}')
-					if [ -n "$port2" ]; then
-						echo -e "\t\tWait" $(( $INTERVAL * 3 )) "seconds then URL to complete command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port2
-					fi
-				else
-					echo $interface "is an invalid interface!"
-				fi
-				echo ""
-			done
-			echo $dashes
-		} > /tmp/knock.txt
-
-		more /tmp/knock.txt #Using "more" command for long config files
-
-		read -p "(E)dit command, (A)dd command, (D)elete command, or (Q)uit editing? (e,a,d,q): " SelectEdit
-
-		case $SelectEdit in
-		 [Aa])
-			#Add command
-			commandnum=$commandcount
-			comment="Example comment"
-			ports=44444
-			interfaces="br0"
-			cmd="ls #example command"
-			if [ $commandnum -ne 0 ]; then
-				ports=$(eval echo \"\$ports$commandnum\")
-				ports=$((ports+1))
-				comment="$(eval echo \"\$comment$commandnum\")"
-				interfaces=$(eval echo \"\$interfaces$commandnum\")
-				cmd=$(eval echo \"\$cmd$commandnum\")
-			fi
-			commandnum=$((commandnum+1))
-			commandcount=$commandnum
-
-			echo "Adding new Command #" $commandnum
-			echo ""
-			editknockentry
-			echo ""
-			echo -n "Save changes to port knock entry? (y=Yes, n=No):"
-			if promptyn ; then
-				eval comment$commandnum=\"$comment\"
-				eval ports$commandnum=\"$ports\"
-				eval interfaces$commandnum=\"$interfaces\"
-				eval cmd$commandnum=\"$cmd\"
-				updated=1
-			else
-				commandcount=$((commandcount-1))
-			fi
-			;;
-
-		 [Dd])
-			#Delete command
-			while [ true ]; do
-				echo ""
-				echo -n "Enter command number to delete (1 to" $commandcount"): "
-				read -p "" commandnum
-				if [ $commandnum -gt 0 -a $commandnum -le $commandcount ] 2> /dev/null; then
-					break
-				fi
-			done
-			echo ""
-			echo -n "Delete knock entry #" $commandnum "? (y=Yes, n=No): "
-			if promptyn ; then
-				while [ $commandnum -lt $commandcount ]; do
-					commandnumold=$((commandnum+1))
-					comment="$(eval echo \"\$comment$commandnumold\")"
-					ports=$(eval echo \"\$ports$commandnumold\")
-					interfaces=$(eval echo \"\$interfaces$commandnumold\")
-					cmd=$(eval echo \"\$cmd$commandnumold\")
-					eval comment$commandnum=\"$comment\"
-					eval ports$commandnum=\"$ports\"
-					eval interfaces$commandnum=\"$interfaces\"
-					eval cmd$commandnum=\"$cmd\"
-
-					commandnum=$commandnumold
-				done
-				commandcount=$((commandcount-1))
-				updated=1
-			fi
-			;;
-
-		 [Ee])
-			#Edit command
-			while [ true ]; do
-				echo ""
-				echo -n "Enter command number to edit (1 to" $commandcount"): "
-				read -p "" commandnum
-				if [ $commandnum -gt 0 -a $commandnum -le $commandcount ] 2> /dev/null; then
-					break
-				fi
-			done
-			comment="$(eval echo \"\$comment$commandnum\")"
-			ports=$(eval echo \"\$ports$commandnum\")
-			interfaces=$(eval echo \"\$interfaces$commandnum\")
-			cmd=$(eval echo \"\$cmd$commandnum\")
-			clear
-			echo "Editing Command #" $commandnum
-			echo ""
-			echo -en "\t"
-			echo $comment
-			echo -en "\t"
-			echo "Port" $ports "on" $interfaces
-			echo -en "\t"
-			echo "Command:" "$cmd"
-			echo $dashes
-			echo ""
-			editknockentry
-			echo -n "Save changes to port knock entry? (y=Yes, n=No):"
-			if promptyn ; then
-				eval comment$commandnum=\"$comment\"
-				eval ports$commandnum=\"$ports\"
-				eval interfaces$commandnum=\"$interfaces\"
-				eval cmd$commandnum=\"$cmd\"
-				updated=1
-			fi
-			;;
-
-		 [Qq]) break;;
-		esac
-	done
-
-	echo ""
-	if [ $updated -eq 1 ]; then
-		echo -n "Save changes to config file? (y=Yes, n=No):"
-		if promptyn ; then
-			echo -en "\nSaving configuration"
-
-			echo "#knock.sh configuration file" > $cf
-			echo -e "\n#Format Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]\n" >> $cf
-
-			#Write virtual array back to config file
-			commandnum=0
-			while [ $commandnum -lt $commandcount ]; do
-				commandnum=$((commandnum+1))
-				echo -n "..."$commandnum
-				echo "$(eval echo \"#\$comment$commandnum\")" >> $cf
-				echo $(eval echo \"\$ports$commandnum \$interfaces$commandnum \$cmd$commandnum\") >> $cf
-				echo "" >> $cf
-			done
-			echo -e "\n\nNew config file:"
-			echo $dashes
-			more $cf
-			echo $dashes
-			echo -n "Press any key to continue..."
-			read -n 1 -r yn
-			echo ""
-		else
-			echo ""
-		fi
-	fi
-
-	if [ "$2" = "" ]; then
-		clear
-		banner
-		echo "Thanks for using knock.sh!"
-	fi
-	return
-}
-
 if [ "$1" = "-edit" ]; then
 	editcommand "-edit" $2
 	exit
 fi
 
-
-if [ "$1" = "" ]; then
-
-	#Main menu loop
-	while [ true ]; do
-		clear
-		banner
-		showstatus
-
-		echo ""
-		echo "Main Menu"
-		echo "========="
-		echo ""
-		echo "1. Install/reinstall knock.sh"
-		echo "2. Uninstall knock.sh"
-		if checkinstall ; then
-			echo "3. Display knock.sh config file"
-			echo "4. Start/restart knock.sh background process"
-			echo "5. Stop knock.sh background process"
-			echo "6. Edit knock.sh config file"
-			echo "7. Update script to latest version"
-		fi
-		echo ""
-		echo "e. Exit"
-		echo ""
-
-		read -p "Enter selection: " SelectMenu
-
-		case $SelectMenu in
-
-		 [1])
-			sh $sf -install -force
-			sh $sf -stop -nobanner > /dev/null
-
-			if checkinstall ; then
-				if [ -f $tf ]; then
-					echo -ne "\t"
-					if  promptyn "Restore saved config file ("$tf")? (y/n):" ; then
-						echo -en "\n\tRestoring saved file..."
-						cp $tf $cf
-						echo -e $cm
-					else
-						echo -e "\n\tKeeping default file."
-					fi
-				fi
-				echo ""
-				echo "Knock.sh Rev" $REV "successfully installed!"
-				echo ""
-				if  promptyn "Would you like to edit the config file now ("$cf")? (y/n):" ; then
-					echo ""
-					sh $sf -edit -nobanner
-					if  promptyn "Are you ready to start processing knocks (start knock.sh)? (y/n):" ; then
-						echo ""
-						sh $sf -start -nobanner
-					else
-						echo ""
-						echo "When ready, please run start from main menu"
-					fi
-				else
-					echo ""
-					echo "Please edit the configuration file from main menu"
-					echo ""
-					echo "Once updated, please run choose start from the main menu to begin processing knocks"
-				fi
-			fi
-
-
-			echo -n "Press any key to continue..."
-			read -n 1 -r yn
-			echo ""
-			exec $sf
-			exit
-			;;
-		 [2])
-			sh $sf -uninstall
-			exit;;
-
-
-		 [Ee]) break;;
-		esac
-
-		if checkinstall ; then
-			case $SelectMenu in
-
-		 	 [3])
-				$sf -config
-				echo -n "Press any key to continue..."
-				read -n 1 -r yn
-				echo ""
-				;;
-			 [4])
-				$sf -start -nobanner
-				echo -n "Press any key to continue..."
-				read -n 1 -r yn
-				echo ""
-				;;
-			 [5])
-				$sf -stop -nobanner
-				echo -n "Press any key to continue..."
-				read -n 1 -r yn
-				echo ""
-				;;
-			 [6])
-				editcommand -edit -nobanner
-				if [ $updated -eq 1 ]; then
-					if  promptyn "Are you ready to start processing knocks (start knock.sh)? (y/n):" ; then
-						echo ""
-						$sf -start -nobanner
-					else
-						echo ""
-						$sf -stop -nobanner
-					fi
-				fi
-				echo -n "Press any key to continue..."
-				read -n 1 -r yn
-				echo ""
-				;;
-			 [7])
-				if updatecommand; then
-					echo -n "Press any key to restart knock.sh..."
-					read -n 1 -r yn
-					echo ""
-					clear
-					exec $sf
-					exit
-				else
-					echo -n "Press any key to continue..."
-					read -n 1 -r yn
-					echo ""
-				fi
-				;;
-			esac
-		fi
-	done
-
-	clear
-	banner
-	echo "Thanks for using knock.sh!"
-	exit
-fi
-
-
-if [ "$1" != "-loop" ]; then
+if [ "$1" != "-loop" ]
+then
 	echo "Knock.sh: Router Commands for non-admin users"
 	echo "Version" $REV
 	echo ""
@@ -1221,50 +1265,55 @@ if [ "$1" != "-loop" ]; then
 	exit
 fi
 
-if [ ! -f $cf ]; then
+if [ ! -s "$cf" ]
+then
 	echo "Error: Missing configuration file" $cf
 	logger -t "knock.sh" "Error: Missing configuration file" $cf
 	exit 1
 fi
 
-function readDATA {
+Read_DATA()
+{
 	#Fix for missing "DF" flag
 	#dmesg | grep "knock.sh" | tail -n 1 | awk '{print $11 " " $15 " " $2}'; }
-	dmesg | grep "knock.sh" | tail -n 1 | awk '{print $11 " " $14 " " $15 " " $2}'; }
-function readID {
-	echo $DATA | awk '{print $1}' | awk -F '=' '{print $2}'; }
+	dmesg | grep "knock.sh" | tail -n 1 | awk '{print $11 " " $14 " " $15 " " $2}'
+}
+Read_ID()
+{
+	echo $kDATA | awk '{print $1}' | awk -F '=' '{print $2}'
+}
 
-DATA=$(readDATA)
-oldID=$(readID)
+kDATA="$(Read_DATA)"
+oldID=$(Read_ID)
 
 echo "Knock.sh started"
-echo "Version" $REV
+echo "Version $REV"
 echo "Waiting for port knocks..."
 logger -t "knock.sh" "Waiting for port knocks..."
 
 #Fix Iphone ID always 0 issue
 if [ $oldID -eq 0 ]; then
 	logger -t "knock.sh" "IDs are zero. Adding fake kernel ring buffer message."
-	echo "knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID="$FAKE_ID >/dev/kmsg
-	oldID=$FAKE_ID
+	echo "knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID="$FAKE_NUMID >/dev/kmsg
+	oldID=$FAKE_NUMID
 fi
 
 while sleep $INTERVAL;do
-	DATA=$(readDATA)
-	ID=$(readID)
+    	kDATA="$(Read_DATA)"
+	ID=$(Read_ID)
 
 	if [ "$ID" != "$oldID" ]; then
 		#Fix for missing DF flag
-		#KPORT=$(echo $DATA | awk '{print $2}' | awk -F '=' '{print $2}')
-		if $(echo $DATA | grep -q "WINDOW");then
-			KPORT=$(echo $DATA | awk '{print $2}' | awk -F '=' '{print $2}')
+		#KPORT=$(echo $kDATA | awk '{print $2}' | awk -F '=' '{print $2}')
+		if $(echo $kDATA | grep -q "WINDOW");then
+			KPORT=$(echo $kDATA | awk '{print $2}' | awk -F '=' '{print $2}')
 			DF="DF flag not set"
 		else
-			KPORT=$(echo $DATA | awk '{print $3}' | awk -F '=' '{print $2}')
+			KPORT=$(echo $kDATA | awk '{print $3}' | awk -F '=' '{print $2}')
 			DF=""
 		fi
-		#KINT=$(echo $DATA | awk '{print $3}' | awk -F '=' '{print $2}')
-		KINT=$(echo $DATA | awk '{print $4}' | awk -F '=' '{print $2}')
+		#KINT=$(echo $kDATA | awk '{print $3}' | awk -F '=' '{print $2}')
+		KINT=$(echo $kDATA | awk '{print $4}' | awk -F '=' '{print $2}')
 		echo  "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID $DF
 		logger -t "knock.sh" "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID $DF
 
@@ -1305,14 +1354,15 @@ while sleep $INTERVAL;do
 
 		sleep $INTERVAL
 		sleep $INTERVAL
-		DATA=$(readDATA)
-		oldID=$(readID)
+		kDATA=$(Read_DATA)
+		oldID=$(Read_ID)
 
 		#Fix Iphone ID always 0 issue
 		if [ $oldID -eq 0 ]; then
 			logger -t "knock.sh" "IDs are zero. Adding fake kernel ring buffer message."
-			echo "knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID="$FAKE_ID >/dev/kmsg
-			oldID=$FAKE_ID
+        		echo "$FAKE_KMESG" >/dev/kmsg
+			oldID=$FAKE_NUMID
 		fi
 	fi
 done
+#EOF#
