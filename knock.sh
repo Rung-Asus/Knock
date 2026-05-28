@@ -68,7 +68,7 @@
 # - Prepare for Martinski merge
 #    - Added readonly to constants, quotes around string definitions, change function definition style, rearanged function order, renamed subroutines & variables
 # - Added min knock port, changed fake ID
-# - Added Martinski interactive test and logger
+# - Added Martinski interactive test, logger, mutex lock
 
 version=2.1.0
 readonly REV="$version"
@@ -142,6 +142,9 @@ echo "|_|\_\|_| |_|\___/ \___|_|\_\(_)___/_| |_| v"$REV
 echo "                                          "
 }
 
+#----------------------------------------#
+# Modified by Martinski W. [2026-May-17] #
+#----------------------------------------#
 #Trap exit to restore tty to normal#
 CleanUp()
 {
@@ -150,6 +153,7 @@ CleanUp()
 	fi
 	clear
 	banner
+    _ReleaseMutexFLock_ checkLockOK
 	printf "\nExiting...\n"
 	exit 1
 }
@@ -786,6 +790,63 @@ _LogMsg_()
     fi
     logger -t "$logTagStr" -p $logPrioNum "$1"
 }
+##-------------------------------------##
+## Added by Martinski W. [2026-May-17] ##
+##-------------------------------------##
+readonly knockMutexFLock_FD=564
+readonly knockMutexFLock_FN="/tmp/var/${scriptFNameTag}_Loop.FLOCK"
+knockMutexFLock_OK=false  #DO NOT have FLock#
+
+_ReleaseMutexFLock_()
+{
+    if [ $# -gt 0 ] && \
+       [ "$1" = "checkLockOK" ] && \
+       [ "$knockMutexFLock_OK" = "false" ]
+    then return 0
+    fi
+    printf '' > "$knockMutexFLock_FN"
+    flock -u "$knockMutexFLock_FD" 2>/dev/null
+    knockMutexFLock_OK=false
+}
+
+_AcquireMutexFLock_()
+{
+    local retCode  procInfo  procName  procIDno  procIDof=""
+
+    if [ -s "$knockMutexFLock_FN" ]
+    then
+        procInfo="$(head -n1 "$knockMutexFLock_FN")"
+        procName="$(echo "$procInfo" | cut -d'|' -f1)"
+        procIDno="$(echo "$procInfo" | cut -d'|' -f2)"
+        if [ -n "$procName" ] && [ -n "$procIDno" ]
+        then procIDof="$(pidof "$procName")"
+        fi
+        if [ -z "$procIDof" ] || \
+           ! echo "$procIDof" | grep -qow "$procIDno"
+        then
+            _LogMsg_ "Stale Lock Found. Resetting Lock file..."
+            _ReleaseMutexFLock_
+        fi
+    fi
+
+    [ ! -s "$knockMutexFLock_FN" ] && \
+    eval exec "$knockMutexFLock_FD>$knockMutexFLock_FN"
+
+    if flock -x -n "$knockMutexFLock_FD" 2>/dev/null
+    then
+        printf "$(basename "$0")|$$\n" > "$knockMutexFLock_FN"
+        retCode=0 ; knockMutexFLock_OK=true
+    else
+        procInfo="$(head -n1 "$knockMutexFLock_FN")"
+        if [ -n "$procInfo" ]
+        then procInfo="$(echo "$procInfo" | sed 's/|/, PID=/')"
+        fi
+        _LogMsg_ "**ERROR**: Another process [$procInfo] has the Lock." $pLogERROR
+        retCode=1 ; knockMutexFLock_OK=false
+    fi
+
+    return "$retCode"
+}
 ## Main Menu ##
 if [ $# -eq 0 ] || [ -z "$1" ]
 then
@@ -1346,6 +1407,12 @@ Read_ID()
 	echo $kDATA | awk '{print $1}' | awk -F '=' '{print $2}'
 }
 
+#-----------------------------------------------#
+# Make sure ONLY one background loop is running
+#-----------------------------------------------#
+if ! _AcquireMutexFLock_
+then exit 1
+fi
 kDATA="$(Read_DATA)"
 oldID=$(Read_ID)
 
@@ -1427,4 +1494,7 @@ while sleep $INTERVAL;do
 		fi
 	fi
 done
+
+_ReleaseMutexFLock_
+
 #EOF#
