@@ -70,7 +70,7 @@
 # - Added min knock port, changed fake ID
 # - Added Martinski interactive test and logger
 
-readonly version=2.1.0
+version=2.1.0
 readonly REV="$version"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
