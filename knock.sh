@@ -388,6 +388,35 @@ ShowStatus()
 	return
 }
 
+ShowConfig()
+{
+	echo -e "The following ports/interfaces will execute these router commands:\n"
+	lastComment=""
+	commandNum=0
+	while read ports interfaces cmd
+	do
+		if [ -n "$ports" ]; then
+			if [ $(echo $ports | cut -c 1-1) != "#" ]; then
+				commandNum=$(($commandNum+1))
+				echo "Command #" $commandNum
+				echo -e "\t"$lastComment
+				echo -e "\tPort(s)" $ports "on" $interfaces
+				echo -e "\tCommand:" "$cmd"
+				interface=$(echo $interfaces | awk -F',' '{print $1}')
+				port1=$(echo $ports | awk -F',' '{print $1}')
+				echo -e "\tURL to initiate command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port1
+				port2=$(echo $ports | awk -F',' '{print $2}')
+				if [ -n "$port2" ]; then
+					echo -e "\t\tWait" $(( $INTERVAL * 3 )) "seconds then URL to complete command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port2
+				fi
+				echo -e ""
+			else
+				lastComment=$(echo "$ports $interfaces $cmd" | cut -c 2-)
+			fi
+		fi
+	done < "$cf"
+}
+
 function updatecommand {
 	clear
 	banner
@@ -841,35 +870,6 @@ then
     ShowStatus
     exit
 fi
-
-ShowConfig()
-{
-	echo -e "The following ports/interfaces will execute these router commands:\n"
-	lastComment=""
-	commandNum=0
-	while read ports interfaces cmd
-	do
-		if [ -n "$ports" ]; then
-			if [ $(echo $ports | cut -c 1-1) != "#" ]; then
-				commandNum=$(($commandNum+1))
-				echo "Command #" $commandNum
-				echo -e "\t"$lastComment
-				echo -e "\tPort(s)" $ports "on" $interfaces
-				echo -e "\tCommand:" "$cmd"
-				interface=$(echo $interfaces | awk -F',' '{print $1}')
-				port1=$(echo $ports | awk -F',' '{print $1}')
-				echo -e "\tURL to initiate command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port1
-				port2=$(echo $ports | awk -F',' '{print $2}')
-				if [ -n "$port2" ]; then
-					echo -e "\t\tWait" $(( $INTERVAL * 3 )) "seconds then URL to complete command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port2
-				fi
-				echo -e ""
-			else
-				lastComment=$(echo "$ports $interfaces $cmd" | cut -c 2-)
-			fi
-		fi
-	done < "$cf"
-}
 
 if [ "$1" = "-config" ]
 then
