@@ -69,6 +69,7 @@
 #    - Added readonly to constants, quotes around string definitions, change function definition style, rearanged function order, renamed subroutines & variables
 # - Added min knock port, changed fake ID
 # - Added Martinski interactive test, logger, mutex lock
+# - Added force kill during restart (mutext lock)
 
 version=2.1.0
 readonly REV="$version"
@@ -1025,7 +1026,18 @@ then
 	_LogMsg_ "Starting knock.sh background process" NOECHO
 
 	/opt/sbin/screen -S knock -X quit >/dev/null
+
 	sleep 3  #Allow time to terminate process#
+
+	#Kill slow dying process
+	zombie=$(ps w | grep -e "[k]nock.sh -loop")
+	if [ -n "$zombie" ]; then
+		zombie=$(echo $zombie | awk '{print $1}')
+		kill -9 $zombie > /dev/null 2>&1
+		_LogMsg_ "Force killed knock.sh process $zombie during restart"
+	fi
+
+
 	/opt/sbin/screen -dmS knock "$sf" -loop
 	sleep 4  #Wait for any aborts#
 	CheckStatus && exit 0 || exit 1
