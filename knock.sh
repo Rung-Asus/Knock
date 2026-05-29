@@ -41,7 +41,7 @@
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
 #-----------------------------------------------------------------------
-# Last Updated: 28MAY2026
+# Last Updated: 29MAY2026
 ########################################################################
 
 #Update Log:
@@ -69,7 +69,7 @@
 #    - Added readonly to constants, quotes around string definitions, change function definition style, rearanged function order, renamed subroutines & variables
 # - Added min knock port, changed fake ID
 # - Added Martinski interactive test, logger, mutex lock
-# - Added force kill during restart (mutext lock)
+# - Added force kill during restart (mutext lock), added knock log level
 
 version=2.1.0
 readonly REV="$version"
@@ -89,6 +89,9 @@ export PATH="/bin:/usr/bin:/sbin:/usr/sbin:$PATH"
 readonly scriptFileName="${0##*/}"
 readonly scriptFNameTag="${scriptFileName%%.*}"
 readonly logTagStr="${scriptFNameTag}_[$$]"
+
+
+readonly KnockLog=4
 
 if [ -t 0 ] && ! tty | grep -qwi "NOT"
 then
@@ -825,7 +828,7 @@ _AcquireMutexFLock_()
         if [ -z "$procIDof" ] || \
            ! echo "$procIDof" | grep -qow "$procIDno"
         then
-            _LogMsg_ "Stale Lock Found. Resetting Lock file..."
+            _LogMsg_ "Stale Lock Found. Resetting Lock file..." $KnockLog
             _ReleaseMutexFLock_
         fi
     fi
@@ -1034,7 +1037,7 @@ then
 	if [ -n "$zombie" ]; then
 		zombie=$(echo $zombie | awk '{print $1}')
 		kill -9 $zombie > /dev/null 2>&1
-		_LogMsg_ "Force killed knock.sh process $zombie during restart"
+		_LogMsg_ "Force killed knock.sh process $zombie during restart" $KnockLog
 	fi
 
 
@@ -1051,7 +1054,7 @@ then
 		exit 1
 	fi
 
-	_LogMsg_ "Adding port knocking rules to firewall"
+	_LogMsg_ "Adding port knocking rules to firewall" $KnockLog
 
 	while read thePORTS theIFACE cmd
 	do
@@ -1430,7 +1433,7 @@ oldID=$(Read_ID)
 
 echo "Knock.sh started"
 echo "Version $REV"
-_LogMsg_ "Waiting for port knocks..."
+_LogMsg_ "Waiting for port knocks..." $KnockLog
 
 #Fix Iphone ID always 0 issue
 if [ $oldID -eq 0 ]; then
