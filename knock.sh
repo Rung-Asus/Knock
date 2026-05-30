@@ -41,7 +41,7 @@
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
 #-----------------------------------------------------------------------
-# Last Updated: 29MAY2026
+# Last Updated: 30MAY2026
 ########################################################################
 
 #Update Log:
@@ -66,10 +66,11 @@
 # - Fix for packets without DF flag set
 # 2.1.0
 # - Prepare for Martinski merge
-#    - Added readonly to constants, quotes around string definitions, change function definition style, rearanged function order, renamed subroutines & variables
+#    - readonly constants, string definition quotes, function definition style, rearanged & renamed subroutines & variables
 # - Added min knock port, changed fake ID
-# - Added Martinski interactive test, logger, mutex lock
+# - Merged Martinski interactive test, logger, mutex lock
 # - Added force kill during restart (mutext lock), added knock log level
+# - Merged Martinski ShowConfig
 
 version=2.1.0
 readonly REV="$version"
@@ -428,31 +429,79 @@ ShowStatus()
 	return
 }
 
+#-------------------------------------#
+# Added by Martinski W. [2026-May-18] #
+#-------------------------------------#
+_ValidatePortNumber_()
+{
+    if [ $# -eq 0 ] || [ -z "$1" ] || \
+       ! echo "$1" | grep -qE "^[1-9][0-9]{3,4}$" || \
+       [ "$1" -lt "$MIN_KNOCK_PORT" ] || [ "$1" -gt 65535 ]
+    then
+        _LogMsg_ "**ERROR**: INVALID port number [$1]" "$pLogERROR"
+        return 1
+    fi
+    return 0
+}
+
+#----------------------------------------#
+# Modified by Martinski W. [2026-May-18] #
+#----------------------------------------#
 ShowConfig()
 {
-	echo -e "The following ports/interfaces will execute these router commands:\n"
+	local lastComment  commandNum=0  portNum1  portNum2  pIFace  IFaceIPaddr
+
+	_Get_IFace_IPAddress_()
+	{
+		if [ $# -eq 0 ] || [ -z "$1" ] ; then echo "ERROR" ; return 1 ; fi
+		ifconfig "$1" | awk '{print $2}' | grep 'addr:' | awk -F':' '{print $2}'
+	}
+
 	lastComment=""
-	commandNum=0
-	while read ports interfaces cmd
+	printf "The following ports/interfaces will execute these router commands:\n\n"
+
+	while read -r thePORTS theIFACE theCMDx
 	do
-		if [ -n "$ports" ]; then
-			if [ $(echo $ports | cut -c 1-1) != "#" ]; then
-				commandNum=$(($commandNum+1))
-				echo "Command #" $commandNum
-				echo -e "\t"$lastComment
-				echo -e "\tPort(s)" $ports "on" $interfaces
-				echo -e "\tCommand:" "$cmd"
-				interface=$(echo $interfaces | awk -F',' '{print $1}')
-				port1=$(echo $ports | awk -F',' '{print $1}')
-				echo -e "\tURL to initiate command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port1
-				port2=$(echo $ports | awk -F',' '{print $2}')
-				if [ -n "$port2" ]; then
-					echo -e "\t\tWait" $(( $INTERVAL * 3 )) "seconds then URL to complete command:" $(ifconfig  $interface | awk '{print $2}' | grep addr | sed 's/addr:/http:\/\//g')":"$port2
-				fi
-				echo -e ""
-			else
-				lastComment=$(echo "$ports $interfaces $cmd" | cut -c 2-)
+		if [ -z "$thePORTS" ]
+		then
+			lastComment=""
+			continue
+		fi
+		if [ "$(echo "$thePORTS" | cut -c 1-1)" != "#" ]
+		then
+			commandNum="$((commandNum + 1))"
+			printf "Command #%2d\n" "$commandNum"
+			if [ -n "$lastComment" ]
+			then
+				printf "\t%s\n" "$lastComment"
+				lastComment=""
 			fi
+			printf "\tPort(s): %s on %s\n" "$thePORTS" "$theIFACE"
+			printf "\tCommand: %s\n" "$theCMDx"
+
+			portNum1="$(echo "$thePORTS" | awk -F',' '{print $1}')"
+			portNum2="$(echo "$thePORTS" | awk -F',' '{print $2}')"
+			if { [ -n "$portNum1" ] && ! _ValidatePortNumber_ "$portNum1" ; } || \
+			   { [ -n "$portNum2" ] && ! _ValidatePortNumber_ "$portNum2" ; }
+			then
+				_LogMsg_ "*WARNING*: The port knock entry will be ignored" $pLogWARNG
+				printf "\n\n"
+				continue
+			fi
+
+			pIFace="$(echo "$theIFACE" | awk -F',' '{print $1}')"
+			IFaceIPaddr="$(_Get_IFace_IPAddress_ "$pIFace")"
+			printf "\tURL to initiate command: "
+			printf "http://%s:%s\n" "$IFaceIPaddr" "$portNum1"
+
+			if [ -n "$portNum2" ]
+			then
+				printf "\t\tWait $((INTERVAL * 3)) seconds then URL to complete command: "
+				printf "http://%s:%s\n" "$IFaceIPaddr" "$portNum2"
+			fi
+			echo
+		else
+			lastComment="$(echo "$thePORTS $theIFACE $theCMDx" | cut -c 2- | sed 's/^ *//')"
 		fi
 	done < "$cf"
 }
@@ -794,6 +843,7 @@ _LogMsg_()
     fi
     logger -t "$logTagStr" -p $logPrioNum "$1"
 }
+
 ##-------------------------------------##
 ## Added by Martinski W. [2026-May-17] ##
 ##-------------------------------------##
