@@ -70,7 +70,8 @@
 # - Added min knock port, changed fake ID
 # - Merged Martinski interactive test, logger, mutex lock
 # - Added force kill during restart (mutext lock), added knock log level
-# - Merged Martinski ShowConfig
+# - Merged Martinski ShowConfig, firewall code
+# - Added firewall logging (random missing rule issue)
 
 version=2.1.0
 readonly REV="$version"
@@ -1096,6 +1097,9 @@ then
 	CheckStatus && exit 0 || exit 1
 fi
 
+#----------------------------------------#
+# Modified by Martinski W. [2026-May-18] #
+#----------------------------------------#
 if [ "$1" = "-firewall" ]
 then
 	if [ ! -s "$cf" ]
@@ -1103,27 +1107,39 @@ then
 		_LogMsg_ "**ERROR**: Missing configuration file [$cf]" $pLogERROR
 		exit 1
 	fi
-
 	_LogMsg_ "Adding port knocking rules to firewall" $KnockLog
 
-	while read thePORTS theIFACE cmd
+	while read -r cfgLINE
 	do
-		if [ -n "$thePORTS" ] && [ $(echo $thePORTS | cut -c 1-1) != "#" ]; then
-			COUNT=0
-			for port in $(echo "$thePORTS" | tr ',' ' ')
-			do
-				COUNT="$((COUNT + 1))"
-				if [ "$COUNT" -gt 2 ]
-				then
-					break
-				fi
-				for IFace in $(echo "$theIFACE" | tr ',' ' ')
-				do
-					iptables -D INPUT -i $IFace -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info 2> /dev/null
-					iptables -I INPUT -i $IFace -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info
-				done
-			done
+		if [ -z "$cfgLINE" ] || \
+		   echo "$cfgLINE" | grep -qE "^[[:blank:]]*[#].*"
+		then continue  #SKIP#
 		fi
+		thePORTS="$(echo "$cfgLINE" | awk -F' ' '{print $1}')"
+		theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
+		theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
+
+		if [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
+		then
+			_LogMsg_ "**ERROR**: The port knock entry [$cfgLINE] is INVALID" $pLogERROR
+			continue
+		fi
+		COUNT=0
+		for port in $(echo "$thePORTS" | tr ',' ' ')
+		do
+			COUNT="$((COUNT + 1))"
+			if [ "$COUNT" -gt 2 ] || ! _ValidatePortNumber_ "$port"
+			then
+				_LogMsg_ "*WARNING*: The port knock entry [$cfgLINE] is ignored" $pLogWARNG
+				break
+			fi
+			for IFace in $(echo "$theIFACE" | tr ',' ' ')
+			do
+				iptables -D INPUT -i $IFace -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info 2>/dev/null
+				iptables -I INPUT -i $IFace -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info
+				_LogMsg_ "Knock port $port on interface $IFace" $KnockLog
+			done
+		done
 	done < "$cf"
 
 	exit
