@@ -71,7 +71,7 @@
 # - Merged Martinski interactive test, logger, mutex lock
 # - Added force kill during restart (mutext lock), added knock log level
 # - Merged Martinski ShowConfig, firewall code
-# - Added firewall logging (random missing rule issue)
+# - Added new firewall check to ShowStatus for missing firewall rules
 
 version=2.1.0
 readonly REV="$version"
@@ -114,6 +114,8 @@ jf="/jffs"
 id="${jf}/addons/knock.d"
 cf="${id}/knock.cfg"
 tf="/tmp/knock.cfg"
+ff="/tmp/iptables.txt"
+ff2="/tmp/iptables2.txt"
 vf="${id}/version.txt"
 js="${jf}/scripts"
 sf="${js}/knock.sh"
@@ -417,6 +419,59 @@ CheckStatus()
 	return 0
 }
 
+#Verify no missing firewall rules
+CheckFirewall()
+{
+	if [ ! -s "$cf" ]
+	then
+		return 1
+	fi
+
+	#Save current firewall knock rules
+	iptables -S INPUT | grep "knock.sh" > $ff
+
+	rm $ff2 2> /dev/null
+	touch $ff2
+
+	#Recreate rules from config file
+	while read -r cfgLINE
+	do
+		if [ -z "$cfgLINE" ] || \
+		   echo "$cfgLINE" | grep -qE "^[[:blank:]]*[#].*"
+		then continue  #SKIP#
+		fi
+		thePORTS="$(echo "$cfgLINE" | awk -F' ' '{print $1}')"
+		theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
+		theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
+
+		if [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
+		then
+			return 1
+		fi
+		COUNT=0
+		for port in $(echo "$thePORTS" | tr ',' ' ')
+		do
+			COUNT="$((COUNT + 1))"
+			if [ "$COUNT" -gt 2 ] || ! _ValidatePortNumber_ "$port"
+			then
+				break
+			fi
+			for IFace in $(echo "$theIFACE" | tr ',' ' ')
+			do
+				#Save rules in reverse order
+				echo '-A INPUT -i' $IFace '-p tcp -m tcp --dport' $port '-j LOG --log-prefix "knock.sh " --log-level 6' | cat - $ff2 > /tmp/tmp && mv /tmp/tmp $ff2
+			done
+		done
+	done < "$cf"
+
+	#Files should match
+	if $(cmp -s $ff $ff2) ; then
+		return 0
+	else
+		return 1
+	fi
+}
+
 ShowStatus()
 {
 	dashes="$(head -c 48 < /dev/zero | tr '\0' '-')"
@@ -427,8 +482,44 @@ ShowStatus()
 	echo "$dashes"
 	CheckStatus && echo -e "|     Run Status: Running & waiting for knocks\t|" || echo -e "|     Run Status: Knock STOPPED\t\t\t|"
 	echo "$dashes"
+	CheckFirewall && echo -e "|Firewall Status: All rules in place\t\t|" || echo -e "|Firewall Status: MISSING RULE. RESTART knock!\t|"
+	echo "$dashes"
 	return
 }
+
+#-------------------------------------#
+# Added by Martinski W. [2026-May-18] #
+#-------------------------------------#
+readonly pLogALERT=1
+readonly pLogCRITC=2
+readonly pLogERROR=3
+readonly pLogWARNG=4
+readonly pLogNOTIC=5
+readonly pLogINFOR=6
+readonly CLEARct="\e[0m"
+readonly ERRORct="\e[1;31m"
+
+_LogMsg_()
+{
+    if [ $# -lt 1 ] || [ -z "$1" ]
+    then return 1
+    fi
+    if [ $# -lt 2 ] || [ -z "$2" ] || \
+       ! echo "$2" | grep -qE "^[1-6]$"
+    then logPrioNum="$pLogNOTIC"
+    else logPrioNum="$2"
+    fi
+    if "$isInteractive" && \
+       { [ $# -lt 2 ] || [ "$2" != "NOECHO" ] ; }
+    then
+        if [ "$logPrioNum" -gt "$pLogERROR" ]
+        then printf "${1}\n"
+        else printf "${ERRORct}${1}${CLEARct}\n"
+        fi
+    fi
+    logger -t "$logTagStr" -p $logPrioNum "$1"
+}
+
 
 #-------------------------------------#
 # Added by Martinski W. [2026-May-18] #
@@ -812,38 +903,6 @@ function editcommand {
 	return
 }
 
-#-------------------------------------#
-# Added by Martinski W. [2026-May-18] #
-#-------------------------------------#
-readonly pLogALERT=1
-readonly pLogCRITC=2
-readonly pLogERROR=3
-readonly pLogWARNG=4
-readonly pLogNOTIC=5
-readonly pLogINFOR=6
-readonly CLEARct="\e[0m"
-readonly ERRORct="\e[1;31m"
-
-_LogMsg_()
-{
-    if [ $# -lt 1 ] || [ -z "$1" ]
-    then return 1
-    fi
-    if [ $# -lt 2 ] || [ -z "$2" ] || \
-       ! echo "$2" | grep -qE "^[1-6]$"
-    then logPrioNum="$pLogNOTIC"
-    else logPrioNum="$2"
-    fi
-    if "$isInteractive" && \
-       { [ $# -lt 2 ] || [ "$2" != "NOECHO" ] ; }
-    then
-        if [ "$logPrioNum" -gt "$pLogERROR" ]
-        then printf "${1}\n"
-        else printf "${ERRORct}${1}${CLEARct}\n"
-        fi
-    fi
-    logger -t "$logTagStr" -p $logPrioNum "$1"
-}
 
 ##-------------------------------------##
 ## Added by Martinski W. [2026-May-17] ##
@@ -1137,7 +1196,6 @@ then
 			do
 				iptables -D INPUT -i $IFace -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info 2>/dev/null
 				iptables -I INPUT -i $IFace -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info
-				_LogMsg_ "Knock port $port on interface $IFace" $KnockLog
 			done
 		done
 	done < "$cf"
