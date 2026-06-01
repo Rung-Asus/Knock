@@ -759,6 +759,9 @@ UpdateScript()
 {
 	clear
 	banner
+	ShowConfig
+	exit
+fi
 
 	if [ -f "$df" ]
 	then
@@ -795,8 +798,6 @@ UpdateScript()
 		echo "Error: network issue"
 		return 1
 	fi
-	return 0
-}
 
 #----------------------------------------#
 # Modified by Martinski W. [2026-May-31] #
@@ -871,6 +872,11 @@ EditPortKnockConfig()
 			if _CheckDupPortFound_ "$pNumber" NOLOG
 			then allGood=false
 			fi
+			for IFace in $(echo "$theIFACE" | tr ',' ' ')
+			do
+				iptables -D INPUT -i $IFace -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info 2>/dev/null
+				iptables -I INPUT -i $IFace -p tcp -m tcp --dport $port -j LOG --log-prefix "knock.sh " --log-level info
+			done
 		done
 		if [ "$portCount" -gt 2 ]
 		then
@@ -1189,11 +1195,20 @@ EditPortKnockConfig()
 					_PressAnyKey_
 				fi
 			fi
-			;;
+		 fi
+		fi
+	fi
 
-		 [Qq]) break;;
-		esac
-	done
+	#Add post-mount command
+	echo -ne "\tUpdating post-mount file..."
+	if ! [ -f $pm ]; then
+		echo "#!/bin/sh" > $pm
+      		echo "" >> $pm
+		chmod 755 $pm
+	fi
+	sed -i -e '/knock.sh/d' $pm
+	echo "(sleep 30 &&" $sf "-screen) & # Added by knock.sh" >> $pm
+	echo -e $cm
 
 	echo
 	rm -f "$tempPKnockRules"
@@ -1227,6 +1242,8 @@ EditPortKnockConfig()
 			cfgUpdated=false
 		fi
 	fi
+	exit
+fi
 
 	if [ $# -lt 2 ] || [ -z "$2" ]
 	then
