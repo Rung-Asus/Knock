@@ -427,11 +427,8 @@ CheckFirewall()
 		return 1
 	fi
 
-	#Save current firewall knock rules
-	iptables -S INPUT | grep "knock.sh" > $ff
-
-	rm $ff2 2> /dev/null
-	touch $ff2
+	#Clear temp file
+	> $ff2
 
 	#Recreate rules from config file
 	while read -r cfgLINE
@@ -459,17 +456,20 @@ CheckFirewall()
 			for IFace in $(echo "$theIFACE" | tr ',' ' ')
 			do
 				#Save rules in reverse order
-				echo '-A INPUT -i' $IFace '-p tcp -m tcp --dport' $port '-j LOG --log-prefix "knock.sh " --log-level 6' | cat - $ff2 > /tmp/tmp && mv /tmp/tmp $ff2
+				echo '-A INPUT -i' $IFace '-p tcp -m tcp --dport' $port '-j LOG --log-prefix "knock.sh " --log-level 6' | cat - $ff2 > $ff && mv $ff $ff2
 			done
 		done
 	done < "$cf"
 
+	#Save current firewall knock rules
+	iptables -S INPUT | grep "knock.sh" > $ff
+
 	#Files should match
-	if $(cmp -s $ff $ff2) ; then
+	if $(cmp -s $ff $ff2); then
 		return 0
-	else
-		return 1
 	fi
+	#else
+	return 1
 }
 
 ShowStatus()
@@ -478,11 +478,11 @@ ShowStatus()
 	echo "$dashes"
 	echo -e "| Knock.sh: Router Commands for non-admin users\t|"
 	echo "$dashes"
-	CheckInstall && echo -e "| Install Status: Installed\t\t\t|" || echo -e "| Install Status: Knock not properly installed!\t|"
+	CheckInstall && echo -e "|  Install Status: Installed\t\t\t|" || echo -e "|  Install Status: Knock not properly installed!|"
 	echo "$dashes"
-	CheckStatus && echo -e "|     Run Status: Running & waiting for knocks\t|" || echo -e "|     Run Status: Knock STOPPED\t\t\t|"
+	CheckFirewall && echo -e "| Firewall Status: All rules in place\t\t|" || echo -e "| Firewall Status: MISSING RULE. RESTART knock!\t|"
 	echo "$dashes"
-	CheckFirewall && echo -e "|Firewall Status: All rules in place\t\t|" || echo -e "|Firewall Status: MISSING RULE. RESTART knock!\t|"
+	CheckStatus && echo -e "|      Run Status: Running & waiting for knocks\t|" || echo -e "|      Run Status: Knock STOPPED\t\t|"
 	echo "$dashes"
 	return
 }
