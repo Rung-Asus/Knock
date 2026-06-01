@@ -41,7 +41,7 @@
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
 #-----------------------------------------------------------------------
-# Last Updated: 2026-May-23
+# Last Updated: 30MAY2026
 ########################################################################
 
 #Update Log:
@@ -64,8 +64,16 @@
 # 2.0.2
 # - Fix for double knock early exit bug
 # - Fix for packets without DF flag set
+# 2.1.0
+# - Prepare for Martinski merge
+#    - readonly constants, string definition quotes, function definition style, rearanged & renamed subroutines & variables
+# - Added min knock port, changed fake ID
+# - Merged Martinski interactive test, logger, mutex lock
+# - Added force kill during restart (mutext lock), added knock log level
+# - Merged Martinski ShowConfig, firewall code
+# - Added new firewall check to ShowStatus for missing firewall rules
 
-readonly version=2.0.3
+version=2.1.0
 readonly REV="$version"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
@@ -74,7 +82,6 @@ readonly DOUBLE_KNOCK_WAIT=30
 #To handle ID field from iOS always being ZERO#
 readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
 readonly FAKE_KMESG="knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID=$FAKE_NUMID"
-
 # Give priority to built-in binaries #
 export PATH="/bin:/usr/bin:/sbin:/usr/sbin:$PATH"
 
@@ -84,6 +91,9 @@ export PATH="/bin:/usr/bin:/sbin:/usr/sbin:$PATH"
 readonly scriptFileName="${0##*/}"
 readonly scriptFNameTag="${scriptFileName%%.*}"
 readonly logTagStr="${scriptFNameTag}_[$$]"
+
+
+readonly KnockLog=4
 
 if [ -t 0 ] && ! tty | grep -qwi "NOT"
 then
@@ -104,6 +114,8 @@ jf="/jffs"
 id="${jf}/addons/knock.d"
 cf="${id}/knock.cfg"
 tf="/tmp/knock.cfg"
+ff="/tmp/iptables.txt"
+ff2="/tmp/iptables2.txt"
 vf="${id}/version.txt"
 js="${jf}/scripts"
 sf="${js}/knock.sh"
@@ -144,7 +156,7 @@ echo "                                          "
 #Trap exit to restore tty to normal#
 CleanUp()
 {
-	if [ -n "${stty_save:+xSETOKx}" ]
+	if [ -n "${stty_save:+Rung}" ]
 	then stty "$stty_save"
 	fi
 	clear
@@ -364,10 +376,10 @@ function refresh {
 
  done
 
-    if [ -n "${stty_save:+xSETOKx}" ]
-    then stty "$stty_save"  #Reset to original (e.g. blocking input)#
-    fi
-    return 0
+ if [ -n "${stty_save:+Rung}" ]
+ then stty "$stty_save"  #Reset to original (e.g. blocking input)#
+ fi
+ return 0
 }
 ###############################################
 
@@ -407,6 +419,59 @@ CheckStatus()
 	return 0
 }
 
+#Verify no missing firewall rules
+CheckFirewall()
+{
+	if [ ! -s "$cf" ]
+	then
+		return 1
+	fi
+
+	#Save current firewall knock rules
+	iptables -S INPUT | grep "knock.sh" > $ff
+
+	rm $ff2 2> /dev/null
+	touch $ff2
+
+	#Recreate rules from config file
+	while read -r cfgLINE
+	do
+		if [ -z "$cfgLINE" ] || \
+		   echo "$cfgLINE" | grep -qE "^[[:blank:]]*[#].*"
+		then continue  #SKIP#
+		fi
+		thePORTS="$(echo "$cfgLINE" | awk -F' ' '{print $1}')"
+		theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
+		theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
+
+		if [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
+		then
+			return 1
+		fi
+		COUNT=0
+		for port in $(echo "$thePORTS" | tr ',' ' ')
+		do
+			COUNT="$((COUNT + 1))"
+			if [ "$COUNT" -gt 2 ] || ! _ValidatePortNumber_ "$port"
+			then
+				break
+			fi
+			for IFace in $(echo "$theIFACE" | tr ',' ' ')
+			do
+				#Save rules in reverse order
+				echo '-A INPUT -i' $IFace '-p tcp -m tcp --dport' $port '-j LOG --log-prefix "knock.sh " --log-level 6' | cat - $ff2 > /tmp/tmp && mv /tmp/tmp $ff2
+			done
+		done
+	done < "$cf"
+
+	#Files should match
+	if $(cmp -s $ff $ff2) ; then
+		return 0
+	else
+		return 1
+	fi
+}
+
 ShowStatus()
 {
 	dashes="$(head -c 48 < /dev/zero | tr '\0' '-')"
@@ -417,7 +482,120 @@ ShowStatus()
 	echo "$dashes"
 	CheckStatus && echo -e "|     Run Status: Running & waiting for knocks\t|" || echo -e "|     Run Status: Knock STOPPED\t\t\t|"
 	echo "$dashes"
+	CheckFirewall && echo -e "|Firewall Status: All rules in place\t\t|" || echo -e "|Firewall Status: MISSING RULE. RESTART knock!\t|"
+	echo "$dashes"
 	return
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-May-18] #
+#-------------------------------------#
+readonly pLogALERT=1
+readonly pLogCRITC=2
+readonly pLogERROR=3
+readonly pLogWARNG=4
+readonly pLogNOTIC=5
+readonly pLogINFOR=6
+readonly CLEARct="\e[0m"
+readonly ERRORct="\e[1;31m"
+
+_LogMsg_()
+{
+    if [ $# -lt 1 ] || [ -z "$1" ]
+    then return 1
+    fi
+    if [ $# -lt 2 ] || [ -z "$2" ] || \
+       ! echo "$2" | grep -qE "^[1-6]$"
+    then logPrioNum="$pLogNOTIC"
+    else logPrioNum="$2"
+    fi
+    if "$isInteractive" && \
+       { [ $# -lt 2 ] || [ "$2" != "NOECHO" ] ; }
+    then
+        if [ "$logPrioNum" -gt "$pLogERROR" ]
+        then printf "${1}\n"
+        else printf "${ERRORct}${1}${CLEARct}\n"
+        fi
+    fi
+    logger -t "$logTagStr" -p $logPrioNum "$1"
+}
+
+
+#-------------------------------------#
+# Added by Martinski W. [2026-May-18] #
+#-------------------------------------#
+_ValidatePortNumber_()
+{
+    if [ $# -eq 0 ] || [ -z "$1" ] || \
+       ! echo "$1" | grep -qE "^[1-9][0-9]{3,4}$" || \
+       [ "$1" -lt "$MIN_KNOCK_PORT" ] || [ "$1" -gt 65535 ]
+    then
+        _LogMsg_ "**ERROR**: INVALID port number [$1]" "$pLogERROR"
+        return 1
+    fi
+    return 0
+}
+
+#----------------------------------------#
+# Modified by Martinski W. [2026-May-18] #
+#----------------------------------------#
+ShowConfig()
+{
+	local lastComment  commandNum=0  portNum1  portNum2  pIFace  IFaceIPaddr
+
+	_Get_IFace_IPAddress_()
+	{
+		if [ $# -eq 0 ] || [ -z "$1" ] ; then echo "ERROR" ; return 1 ; fi
+		ifconfig "$1" | awk '{print $2}' | grep 'addr:' | awk -F':' '{print $2}'
+	}
+
+	lastComment=""
+	printf "The following ports/interfaces will execute these router commands:\n\n"
+
+	while read -r thePORTS theIFACE theCMDx
+	do
+		if [ -z "$thePORTS" ]
+		then
+			lastComment=""
+			continue
+		fi
+		if [ "$(echo "$thePORTS" | cut -c 1-1)" != "#" ]
+		then
+			commandNum="$((commandNum + 1))"
+			printf "Command #%2d\n" "$commandNum"
+			if [ -n "$lastComment" ]
+			then
+				printf "\t%s\n" "$lastComment"
+				lastComment=""
+			fi
+			printf "\tPort(s): %s on %s\n" "$thePORTS" "$theIFACE"
+			printf "\tCommand: %s\n" "$theCMDx"
+
+			portNum1="$(echo "$thePORTS" | awk -F',' '{print $1}')"
+			portNum2="$(echo "$thePORTS" | awk -F',' '{print $2}')"
+			if { [ -n "$portNum1" ] && ! _ValidatePortNumber_ "$portNum1" ; } || \
+			   { [ -n "$portNum2" ] && ! _ValidatePortNumber_ "$portNum2" ; }
+			then
+				_LogMsg_ "*WARNING*: The port knock entry will be ignored" $pLogWARNG
+				printf "\n\n"
+				continue
+			fi
+
+			pIFace="$(echo "$theIFACE" | awk -F',' '{print $1}')"
+			IFaceIPaddr="$(_Get_IFace_IPAddress_ "$pIFace")"
+			printf "\tURL to initiate command: "
+			printf "http://%s:%s\n" "$IFaceIPaddr" "$portNum1"
+
+			if [ -n "$portNum2" ]
+			then
+				printf "\t\tWait $((INTERVAL * 3)) seconds then URL to complete command: "
+				printf "http://%s:%s\n" "$IFaceIPaddr" "$portNum2"
+			fi
+			echo
+		else
+			lastComment="$(echo "$thePORTS $theIFACE $theCMDx" | cut -c 2- | sed 's/^ *//')"
+		fi
+	done < "$cf"
 }
 
 function updatecommand {
@@ -725,53 +903,6 @@ function editcommand {
 	return
 }
 
-#-------------------------------------#
-# Added by Martinski W. [2026-May-18] #
-#-------------------------------------#
-readonly pLogALERT=1
-readonly pLogCRITC=2
-readonly pLogERROR=3
-readonly pLogWARNG=4
-readonly pLogNOTIC=5
-readonly pLogINFOR=6
-readonly CLEARct="\e[0m"
-readonly ERRORct="\e[1;31m"
-
-_LogMsg_()
-{
-    if [ $# -lt 1 ] || [ -z "$1" ]
-    then return 1
-    fi
-    if [ $# -lt 2 ] || [ -z "$2" ] || \
-       ! echo "$2" | grep -qE "^[1-6]$"
-    then logPrioNum="$pLogNOTIC"
-    else logPrioNum="$2"
-    fi
-    if "$isInteractive" && \
-       { [ $# -lt 2 ] || [ "$2" != "NOECHO" ] ; }
-    then
-        if [ "$logPrioNum" -gt "$pLogERROR" ]
-        then printf "${1}\n"
-        else printf "${ERRORct}${1}${CLEARct}\n"
-        fi
-    fi
-    logger -t "$logTagStr" -p $logPrioNum "$1"
-}
-
-#-------------------------------------#
-# Added by Martinski W. [2026-May-18] #
-#-------------------------------------#
-_ValidatePortNumber_()
-{
-    if [ $# -eq 0 ] || [ -z "$1" ] || \
-       ! echo "$1" | grep -qE "^[1-9][0-9]{3,4}$" || \
-       [ "$1" -lt "$MIN_KNOCK_PORT" ] || [ "$1" -gt 65535 ]
-    then
-        _LogMsg_ "**ERROR**: INVALID port number [$1]" "$pLogERROR"
-        return 1
-    fi
-    return 0
-}
 
 ##-------------------------------------##
 ## Added by Martinski W. [2026-May-17] ##
@@ -807,7 +938,7 @@ _AcquireMutexFLock_()
         if [ -z "$procIDof" ] || \
            ! echo "$procIDof" | grep -qow "$procIDno"
         then
-            _LogMsg_ "Stale Lock Found. Resetting Lock file..."
+            _LogMsg_ "Stale Lock Found. Resetting Lock file..." $KnockLog
             _ReleaseMutexFLock_
         fi
     fi
@@ -830,12 +961,11 @@ _AcquireMutexFLock_()
 
     return "$retCode"
 }
-
 ## Main Menu ##
 if [ $# -eq 0 ] || [ -z "$1" ]
 then
 	while true
-    do
+	do
 		clear
 		banner
 		ShowStatus
@@ -980,68 +1110,6 @@ then
     exit
 fi
 
-#----------------------------------------#
-# Modified by Martinski W. [2026-May-18] #
-#----------------------------------------#
-ShowConfig()
-{
-	local lastComment  commandNum=0  portNum1  portNum2  pIFace  IFaceIPaddr
-
-	_Get_IFace_IPAddress_()
-	{
-		if [ $# -eq 0 ] || [ -z "$1" ] ; then echo "ERROR" ; return 1 ; fi
-		ifconfig "$1" | awk '{print $2}' | grep 'addr:' | awk -F':' '{print $2}'
-	}
-
-	lastComment=""
-	printf "The following ports/interfaces will execute these router commands:\n\n"
-
-	while read -r thePORTS theIFACE theCMDx
-	do
-		if [ -z "$thePORTS" ]
-		then
-			lastComment=""
-			continue
-		fi
-		if [ "$(echo "$thePORTS" | cut -c 1-1)" != "#" ]
-		then
-			commandNum="$((commandNum + 1))"
-			printf "Command #%2d\n" "$commandNum"
-			if [ -n "$lastComment" ]
-			then
-				printf "\t%s\n" "$lastComment"
-				lastComment=""
-			fi
-			printf "\tPort(s): %s on %s\n" "$thePORTS" "$theIFACE"
-			printf "\tCommand: %s\n" "$theCMDx"
-
-			portNum1="$(echo "$thePORTS" | awk -F',' '{print $1}')"
-			portNum2="$(echo "$thePORTS" | awk -F',' '{print $2}')"
-			if { [ -n "$portNum1" ] && ! _ValidatePortNumber_ "$portNum1" ; } || \
-			   { [ -n "$portNum2" ] && ! _ValidatePortNumber_ "$portNum2" ; }
-			then
-				_LogMsg_ "*WARNING*: The port knock entry will be ignored" $pLogWARNG
-				printf "\n\n"
-				continue
-			fi
-
-			pIFace="$(echo "$theIFACE" | awk -F',' '{print $1}')"
-			IFaceIPaddr="$(_Get_IFace_IPAddress_ "$pIFace")"
-			printf "\tURL to initiate command: "
-			printf "http://%s:%s\n" "$IFaceIPaddr" "$portNum1"
-
-			if [ -n "$portNum2" ]
-			then
-				printf "\t\tWait $((INTERVAL * 3)) seconds then URL to complete command: "
-				printf "http://%s:%s\n" "$IFaceIPaddr" "$portNum2"
-			fi
-			echo
-		else
-			lastComment="$(echo "$thePORTS $theIFACE $theCMDx" | cut -c 2- | sed 's/^ *//')"
-		fi
-	done < "$cf"
-}
-
 if [ "$1" = "-config" ]
 then
 	if [ ! -s "$cf" ]
@@ -1071,7 +1139,18 @@ then
 	_LogMsg_ "Starting knock.sh background process" NOECHO
 
 	/opt/sbin/screen -S knock -X quit >/dev/null
+
 	sleep 3  #Allow time to terminate process#
+
+	#Kill slow dying process
+	zombie=$(ps w | grep -e "[k]nock.sh -loop")
+	if [ -n "$zombie" ]; then
+		zombie=$(echo $zombie | awk '{print $1}')
+		kill -9 $zombie > /dev/null 2>&1
+		_LogMsg_ "Force killed knock.sh process $zombie during restart" $KnockLog
+	fi
+
+
 	/opt/sbin/screen -dmS knock "$sf" -loop
 	sleep 4  #Wait for any aborts#
 	CheckStatus && exit 0 || exit 1
@@ -1087,7 +1166,7 @@ then
 		_LogMsg_ "**ERROR**: Missing configuration file [$cf]" $pLogERROR
 		exit 1
 	fi
-	_LogMsg_ "Adding port knocking rules to firewall"
+	_LogMsg_ "Adding port knocking rules to firewall" $KnockLog
 
 	while read -r cfgLINE
 	do
@@ -1141,7 +1220,7 @@ then
 
 	#Check run location#
 	if [ "$(dirname "$fn")" != "$js" ]
-    then
+	then
 		echo "Error: This script must be run from $js"
 		exit 1
 	fi
@@ -1366,12 +1445,12 @@ if [ "$1" = "-uninstall" ]; then
 fi
 
 if [ "$1" = "-develop" ]; then
-    touch $df
+	touch $df
 	exit
 fi
 
 if [ "$1" = "-main" ]; then
-    rm $df 2>/dev/null
+	rm $df 2>/dev/null
 	exit
 fi
 
@@ -1456,42 +1535,15 @@ then
 	exit 1
 fi
 
-#----------------------------------------#
-# Modified by Martinski W. [2026-May-17] #
-#----------------------------------------#
 Read_DATA()
 {
-    local IFACE  SRCIP  MSGID  DPORT  knockMSG  tempMSG
-
-    knockMSG="$(dmesg | grep -E '^knock.sh[[:blank:]]+' | tail -n1)"
-    if [ -z "$knockMSG" ] ; then echo ; return 1 ; fi
-    tempMSG="$(echo "$knockMSG" | awk -v RS=' ' '{print}')"
-
-    IFACE="$(echo "$tempMSG" | grep '^IN=')"
-    SRCIP="$(echo "$tempMSG" | grep '^SRC=')"
-    MSGID="$(echo "$tempMSG" | grep '^ID=')"
-    DPORT="$(echo "$tempMSG" | grep '^DPT=')"
-    echo "${MSGID:-ID=99999} ${DPORT:-DPT=0} $IFACE $SRCIP"
+	#Fix for missing "DF" flag
+	#dmesg | grep "knock.sh" | tail -n 1 | awk '{print $11 " " $15 " " $2}'; }
+	dmesg | grep "knock.sh" | tail -n 1 | awk '{print $11 " " $14 " " $15 " " $2}'
 }
-
-#----------------------------------------#
-# Modified by Martinski W. [2026-May-17] #
-#----------------------------------------#
 Read_ID()
 {
-    local dmesgID
-    if [ -z "$kDATA" ] ; then echo ; return 1 ; fi
-
-    dmesgID="$(echo "$kDATA" | awk -F' ' '{print $1}' | awk -F '=' '{print $2}')"
-
-    if [ "$dmesgID" -eq 0 ] && [ $# -gt 0 ] && [ "$1" = "checkID" ]
-    then
-        #To handle ID field from iOS always being ZERO#
-        dmesgID="$FAKE_NUMID"
-        echo "$FAKE_KMESG" >/dev/kmsg
-        _LogMsg_ "ID is ZERO. Adding fake kernel ring buffer message." NOECHO
-    fi
-    echo "$dmesgID"
+	echo $kDATA | awk '{print $1}' | awk -F '=' '{print $2}'
 }
 
 #-----------------------------------------------#
@@ -1500,112 +1552,86 @@ Read_ID()
 if ! _AcquireMutexFLock_
 then exit 1
 fi
-
-thePortNum=""
-srceIPaddr=""
-sleepDelayMIN=3
-delayINTERVAL=7
-
 kDATA="$(Read_DATA)"
-prevID="$(Read_ID checkID)"
-nextID="N/A"
+oldID=$(Read_ID)
 
 echo "Knock.sh started"
 echo "Version $REV"
-_LogMsg_ "Waiting for port knocks..."
+_LogMsg_ "Waiting for port knocks..." $KnockLog
 
-#----------------------------------------#
-# Modified by Martinski W. [2026-May-18] #
-#----------------------------------------#
-while true
-do
-    #For Quicker Response#
-    sleep "$sleepDelayMIN"
+#Fix Iphone ID always 0 issue
+if [ $oldID -eq 0 ]; then
+	logger -t "knock.sh" "IDs are zero. Adding fake kernel ring buffer message."
+	echo "knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID="$FAKE_NUMID >/dev/kmsg
+	oldID=$FAKE_NUMID
+fi
 
-    kDATA="$(Read_DATA)"
-    nextID="$(Read_ID)"
+while sleep $INTERVAL;do
+    	kDATA="$(Read_DATA)"
+	ID=$(Read_ID)
 
-    if [ -z "$nextID" ] || [ "$prevID" = "$nextID" ]
-    then continue
-    fi
+	if [ "$ID" != "$oldID" ]; then
+		#Fix for missing DF flag
+		#KPORT=$(echo $kDATA | awk '{print $2}' | awk -F '=' '{print $2}')
+		if $(echo $kDATA | grep -q "WINDOW");then
+			KPORT=$(echo $kDATA | awk '{print $2}' | awk -F '=' '{print $2}')
+			DF="DF flag not set"
+		else
+			KPORT=$(echo $kDATA | awk '{print $3}' | awk -F '=' '{print $2}')
+			DF=""
+		fi
+		#KINT=$(echo $kDATA | awk '{print $3}' | awk -F '=' '{print $2}')
+		KINT=$(echo $kDATA | awk '{print $4}' | awk -F '=' '{print $2}')
+		echo  "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID $DF
+		logger -t "knock.sh" "Knock detected on interface" $KINT "into port" $KPORT "with ID" $ID $DF
 
-    kPORTx="$(echo "$kDATA" | awk -F' ' '{print $2}' | awk -F '=' '{print $2}')"
-    kIFACE="$(echo "$kDATA" | awk -F' ' '{print $3}' | awk -F '=' '{print $2}')"
-    kSRCIP="$(echo "$kDATA" | awk -F' ' '{print $4}' | awk -F '=' '{print $2}')"
-    _LogMsg_ "Knock detected on interface $kIFACE into port $kPORTx with ID=[$nextID] from SRC=[$kSRCIP]"
+		while read ports interfaces cmd
+		do
+			if [ -n "$ports" ] && [ $(echo $ports | cut -c 1-1) != "#" ]; then
+				port1=$(echo $ports | awk -F',' '{print $1}')
+				port2=$(echo $ports | awk -F',' '{print $2}')
+				if [ -n "$port2" ]; then
+					if [ "$KPORT" = "$port1" ]; then
+						echo "Starting port" $port1 "timer"
+						logger -t "knock.sh" "Starting port" $port1 "timer"
+						/opt/sbin/screen -S knock_$port1 -X quit > /dev/null
+						/opt/sbin/screen -dmS knock_$port1 sleep $DOUBLE_KNOCK_WAIT
+						#Change break to continue to fix doubleknock ignoring rest of commands
+						#break
+						continue
+					fi
+					if $(/opt/sbin/screen -ls knock_$port1 >/dev/null); then
+						echo "Port" $port1 "timer running"
+						logger -t "knock.sh" "Port" $port1 "timer running"
+						port=$port2
+					else
+						#Change break to continue to fix doubleknock ignoring rest of commands
+						#break
+						continue
+					fi
+				else
+					port=$port1
+				fi
+				if [ "$KPORT" = "$port" ]; then
+					echo "Executing command:" "$cmd"
+					logger -t "knock.sh" "Executing command:" "$cmd"
+					sh -c "eval $cmd &"
+				fi
+			fi
+		done < $cf
 
-    while read -r cfgLINE
-    do
-        if [ -z "$cfgLINE" ] || \
-           echo "$cfgLINE" | grep -qE "^[[:blank:]]*[#].*"
-        then continue  #SKIP#
-        fi
-        thePORTx="$(echo "$cfgLINE" | awk -F' ' '{print $1}')"
-        theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
-        theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
+		sleep $INTERVAL
+		sleep $INTERVAL
+		kDATA=$(Read_DATA)
+		oldID=$(Read_ID)
 
-        if [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
-        then
-            _LogMsg_ "**ERROR**: The port knock entry [$cfgLINE] is INVALID" $pLogERROR
-            continue
-        fi
-        portNum1="$(echo "$thePORTx" | awk -F',' '{print $1}')"
-        portNum2="$(echo "$thePORTx" | awk -F',' '{print $2}')"
-
-        if ! _ValidatePortNumber_ "$portNum1"
-        then
-            _LogMsg_ "*WARNING*: The port knock entry [$cfgLINE] is ignored" $pLogWARNG
-            continue
-        fi
-
-        if ! echo "$thePORTx" | grep -qw "\b${kPORTx}\b" || \
-           ! echo "$theIFACE" | grep -qw "\b${kIFACE}\b"
-        then continue  #NO MATCH#
-        fi
-
-        thePortNum="$portNum1"
-
-        if [ -n "$portNum2" ]
-        then
-            if ! _ValidatePortNumber_ "$portNum2"
-            then
-                _LogMsg_ "*WARNING*: The port knock entry [$cfgLINE] is ignored" $pLogWARNG
-                continue
-            fi
-            thePortNum=""
-            if [ "$kPORTx" = "$portNum1" ]
-            then
-                _LogMsg_ "Starting port $portNum1 timer"
-                /opt/sbin/screen -S knock_$portNum1 -X quit >/dev/null
-                /opt/sbin/screen -dmS knock_$portNum1 sleep $DOUBLE_KNOCK_WAIT
-                srceIPaddr="$kSRCIP"
-                break  #Get Next Port in the sequence#
-            fi
-
-            if [ "$kPORTx" = "$portNum2" ]  && \
-               [ "$kSRCIP" = "$srceIPaddr" ] && \
-               /opt/sbin/screen -ls knock_$portNum1 >/dev/null
-            then
-                _LogMsg_ "Port $portNum1 timer running"
-                /opt/sbin/screen -S knock_$portNum1 -X quit >/dev/null
-                #Got Correct Port Sequence#
-                thePortNum="$portNum2"
-            fi
-        fi
-
-        if [ -n "$thePortNum" ] && [ "$kPORTx" = "$thePortNum" ]
-        then
-            thePortNum="" ; srceIPaddr=""
-            _LogMsg_ "Executing [ID=$nextID] CMD: [$theCMDx $thePORTx]" $pLogWARNG
-            eval $theCMDx "$thePORTx" &
-            break  #Get Next Port Knock#
-        fi
-    done < "$cf"
-
-    sleep "$delayINTERVAL"
-    # Get retry entry #
-    kDATA="$(Read_DATA)"
-    prevID="$(Read_ID checkID)"
+		#Fix Iphone ID always 0 issue
+		if [ $oldID -eq 0 ]; then
+			logger -t "knock.sh" "IDs are zero. Adding fake kernel ring buffer message."
+        		echo "$FAKE_KMESG" >/dev/kmsg
+			oldID=$FAKE_NUMID
+		fi
+	fi
 done
 
 _ReleaseMutexFLock_
