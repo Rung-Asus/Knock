@@ -729,9 +729,9 @@ ShowStatus()
 	fi
 	printf "${dashes}\n"
 	if CheckFirewall
-    then printf "|Firewall Status: ${GREENct}All rules in place${CLEARct}\t\t|\n"
-    else printf "|Firewall Status: ${REDct}MISSING RULE${CLEARct}. RESTART knock!\t|\n"
-    fi
+	then printf "|Firewall Status: ${GREENct}All rules in place${CLEARct}\t\t|\n"
+	else printf "|Firewall Status: ${REDct}MISSING RULE${CLEARct}. RESTART knock!\t|\n"
+	fi
 	printf "${dashes}\n\n"
 	return
 }
