@@ -41,7 +41,7 @@
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jun-01
+# Last Updated: 2026-Jun-02
 ########################################################################
 
 #Update Log:
@@ -147,7 +147,7 @@ export SCREENDIR="${HOME}/.screen"
 # Modified by Martinski W. [2026-May-17] #
 #----------------------------------------#
 #Trap exit to restore TTY#
-trap CleanUp HUP INT QUIT ABRT TERM
+trap 'CleanUp' HUP INT QUIT ABRT TERM
 
 #set -x
 
@@ -480,7 +480,6 @@ readonly protoFLregex="[:](T(CP)?|U(DP)?)"
 readonly portNUMregex="[1-9][0-9]{3,4}"
 readonly portT01regex="${portNUMregex}:T"
 readonly portU01regex="${portNUMregex}:U"
-readonly portSTRregex="${portNUMregex}${protoFLregex}"
 readonly portDEFregex="${portNUMregex}(${protoFLregex})?"
 
 #-------------------------------------#
@@ -499,7 +498,7 @@ _GetTaggedPortNumber_()
 
     while true
     do
-        if ! echo "$1" | grep -qE "^${portSTRregex}$"
+        if echo "$1" | grep -qE "^${portNUMregex}$"
         then
             portTMP="${1}_TCP"
             break
@@ -605,7 +604,7 @@ CheckInstall()
 #Verify knock rules are in firewall and knock.sh is running#
 CheckStatus()
 {
-	iptables -L INPUT | grep -q '\bknock.sh' || return 1
+	iptables -S INPUT | grep -q '\bknock.sh' || return 1
 	/opt/sbin/screen -ls knock >/dev/null || return 1
 	return 0
 }
@@ -626,10 +625,10 @@ CheckFirewall()
 	fi
 
 	#Save current firewall knock rules#
-	iptables -S INPUT | grep "knock.sh" > "$ff1"
+	iptables -S INPUT | grep '\bknock.sh' > "$ff1"
 
-	rm -f "$ff2"
 	printf '' > "$ff2"
+	printf '' > "$tempFWR"
 
 	#Recreate rules from config file#
 	while read -r cfgLINE
@@ -719,18 +718,24 @@ ShowStatus()
 	printf "| Knock.sh: Router Commands for non-admin users\t|\n"
 	printf "${dashes}\n"
 	if CheckInstall
-	then printf "| Install Status: ${GREENct}Installed${CLEARct}\t\t\t|\n"
-	else printf "| Install Status: ${REDct}Knock not properly installed${CLEARct}\t|\n"
+	then
+		printf "| Install Status: ${GREENct}Installed${CLEARct}\t\t\t|\n"
+	else
+		printf "| Install Status: ${REDct}Knock not properly installed${CLEARct}\t|\n"
 	fi
 	printf "${dashes}\n"
 	if CheckStatus
-	then printf "|     Run Status: ${GREENct}Running & waiting for knocks${CLEARct}\t|\n"
-	else printf "|     Run Status: Knock ${REDct}STOPPED${CLEARct}\t\t\t|\n"
+	then
+		printf "|     Run Status: ${GREENct}Running & waiting for knocks${CLEARct}\t|\n"
+	else
+		printf "|     Run Status: Knock ${REDct}STOPPED${CLEARct}\t\t\t|\n"
 	fi
 	printf "${dashes}\n"
 	if CheckFirewall
-	then printf "|Firewall Status: ${GREENct}All rules in place${CLEARct}\t\t|\n"
-	else printf "|Firewall Status: ${REDct}MISSING RULE${CLEARct}. RESTART knock!\t|\n"
+	then
+		printf "|Firewall Status: ${GREENct}All rules in place${CLEARct}\t\t|\n"
+	else
+		printf "|Firewall Status: ${REDct}MISSING RULE${CLEARct}. RESTART knock!\t|\n"
 	fi
 	printf "${dashes}\n\n"
 	return
@@ -1590,7 +1595,29 @@ _WaitForCustomFirewallRules_()
     while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
     do
         sleep 1
-        if iptables -L INPUT | grep -q '\bknock.sh'
+        if iptables -S INPUT | grep -q '\bknock.sh'
+        then break
+        fi
+    done
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-02] #
+#-------------------------------------#
+_WaitForBackgroundScreenProcess_()
+{
+    local sleepSecsNUM=0  sleepSecsMAX
+
+    if [ $# -eq 0 ] || [ -z "$1" ] || \
+       ! echo "$1" | grep -qE "^[1-9][0-9]?$"
+    then sleepSecsMAX=10
+    else sleepSecsMAX="$1"
+    fi
+
+    while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
+    do
+        sleep 1
+        if /opt/sbin/screen -ls knock >/dev/null
         then break
         fi
     done
@@ -1815,7 +1842,7 @@ then
 fi
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-May-31] #
+# Modified by Martinski W. [2026-Jun-02] #
 #----------------------------------------#
 if [ "$1" = "-screen" ]
 then
@@ -1838,9 +1865,21 @@ then
 		sleep 3  #Allow time to terminate process#
 	fi
 
+	#Kill rogue background process#
+	roguePID="$(ps w | grep -E '/[k]nock.sh -loop')"
+	if [ -n "$roguePID" ]
+	then
+		roguePID="$(echo "$roguePID" | awk -F' ' '{print $1}')"
+		kill -TERM "$roguePID" >/dev/null 2>&1
+		_LogMsg_ "Force killed knock.sh process [$roguePID] during restart" "$pLogWARNG"
+		sleep 2  #Allow time to terminate process#
+	fi
+
 	/opt/sbin/screen -dmS knock "$sf" -loop
-	sleep 3  #Wait for any aborts#
+	printf "Waiting for background process. Please wait...\n"
+
 	_WaitForCustomFirewallRules_ 5
+	_WaitForBackgroundScreenProcess_ 5
 	CheckStatus && exit 0 || exit 1
 fi
 
