@@ -1629,7 +1629,7 @@ _WaitForBackgroundScreenProcess_()
 _StartBackgroundProcess_()
 {
 	if ! _CheckConfigurationFile_
-	then exit 1
+	then return 1
 	fi
 
 	service restart_firewall >/dev/null
