@@ -41,7 +41,7 @@
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jun-07
+# Last Updated: 2026-Jun-08
 ########################################################################
 
 #Update Log:
@@ -2036,7 +2036,7 @@ then
 
 			if CheckInstall
 			then
-				if [ -f "$savedConfig" ]
+				if [ -s "$savedConfig" ]
 				then
 					echo -ne "\t"
 					if PromptYN "Restore saved config file ($savedConfig)? (y/n):"
@@ -2047,6 +2047,7 @@ then
 					else
 						echo -e "\n\tKeeping default file."
 					fi
+					rm -f "$savedConfig"
 				fi
 				printf "\nKnock.sh version $REV successfully installed!\n\n"
 
@@ -2446,7 +2447,7 @@ _SetUpServicesStart_()
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-07] #
+# Modified by Martinski W. [2026-Jun-08] #
 #----------------------------------------#
 if [ "$1" = "-install" ]
 then
@@ -2476,18 +2477,24 @@ then
 	else action="install"
 	fi
 
-	printf "\nYou have the option to install/use the Entware 'screen' utility.\n"
-	printf "It will replace the built-in background process used by the script.\n"
-	if PromptYN "Would you like to $action the optional Entware 'screen' utility? (y/n):"
-	then useEntwareScreen=true
-	else useEntwareScreen=false
-	fi
+	if [ $# -lt 2 ] || [ -z "$2" ]
+	then
+		printf "\nYou have the option to install/use the Entware 'screen' utility.\n"
+		printf "It will replace the built-in background process used by the script.\n"
+		if PromptYN "Would you like to $action the optional Entware 'screen' utility? (y/n):"
+		then useEntwareScreen=true
+		else useEntwareScreen=false
+		fi
+    else
+		useEntwareScreen="$(_GetConfigOption_ USE_EW_SCREEN false)"
+    fi
+
 	if "$useEntwareScreen"
 	then
-        if _CheckForEntwareScreen_
-        then useEntwareScreen=true
-        else useEntwareScreen=false
-        fi
+		if _CheckForEntwareScreen_
+		then useEntwareScreen=true
+		else useEntwareScreen=false
+		fi
 	fi
 
 	# Set up config file #
@@ -2532,20 +2539,19 @@ EOF
 
 		if [ $# -lt 2 ] || [ -z "$2" ]
 		then
-		    #Optionally restore saved config file, if it exists
-		 if [ -s "$savedConfig" ]
-		 then
-			echo -ne "\t"
-			if PromptYN "Restore saved config file ($savedConfig)? (y/n):"
+			if [ -s "$savedConfig" ]
 			then
-				echo -en "\n\tRestoring saved file..."
-				cp -fp "$savedConfig" "$configFPath"
-				echo -e "$cm"
+				echo -ne "\t"
+				if PromptYN "Restore saved config file ($savedConfig)? (y/n):"
+				then
+					echo -en "\n\tRestoring saved file..."
+					cp -fp "$savedConfig" "$configFPath"
+					echo -e "$cm"
+				else
+					echo -e "\n\tKeeping default file."
+				fi
 				rm -f "$savedConfig"
-			else
-				echo -e "\n\tKeeping default file."
 			fi
-		 fi
 		fi
 	fi
 	chmod 644 "$configFPath"
