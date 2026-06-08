@@ -41,7 +41,7 @@
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jun-02
+# Last Updated: 2026-Jun-07
 ########################################################################
 
 #Update Log:
@@ -77,7 +77,9 @@ readonly version=2.1.0
 readonly REV="$version"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
-readonly DOUBLE_KNOCK_WAIT=30
+readonly MULTI_PORT_KNOCK_WAIT=30
+# MAXIMUM number for a multi-port knock sequence #
+readonly MULTI_PORT_KNOCK_MAX=6
 
 #To handle ID field from iOS always being ZERO#
 readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
@@ -89,21 +91,30 @@ export PATH="/bin:/usr/bin:/sbin:/usr/sbin:$PATH"
 #-------------------------------------#
 # Added by Martinski W. [2026-May-17] #
 #-------------------------------------#
+readonly scriptFilePath="$0"
 readonly scriptFileName="${0##*/}"
 readonly scriptFNameTag="${scriptFileName%%.*}"
 readonly logTagStr="${scriptFNameTag}_[$$]"
+
 readonly pLogALERT=1
 readonly pLogCRITC=2
 readonly pLogERROR=3
 readonly pLogWARNG=4
 readonly pLogNOTIC=5
 readonly pLogINFOR=6
+
 readonly CLEARct="\e[0m"
 readonly REDct="\e[1;31m"
 readonly GREENct="\e[1;32m"
 readonly YELLWct="\e[1;33m"
 readonly ERRORct="$REDct"
 readonly WARNGct="$YELLWct"
+
+readonly TEMP_DIR="/tmp/var/tmp"
+readonly pKnockConfig="knock.cfg"
+readonly scriptConfig="config.txt"
+readonly knockWaitTimerName="knockWaitTimer"
+readonly knockLoopDaemonSEM="${TEMP_DIR}/knockLoopDaemon.SEM"
 
 if [ -t 0 ] && ! tty | grep -qwi "NOT"
 then
@@ -119,29 +130,39 @@ then
 	exit 1
 fi
 
-fn="$(readlink -f "$0")"
-jf="/jffs"
-id="${jf}/addons/knock.d"
-cf="${id}/knock.cfg"
-tf="/tmp/knock.cfg"
-ff1="/tmp/${scriptFNameTag}_iptables1.txt"
-ff2="/tmp/${scriptFNameTag}_iptables2.txt"
-vf="${id}/version.txt"
-js="${jf}/scripts"
-sf="${js}/knock.sh"
-pm="${js}/post-mount"
-fs="${js}/firewall-start"
-pa="${jf}/configs/profile.add"
-giturl="https://raw.githubusercontent.com/Rung-Asus/Knock/main"
-giturld="https://raw.githubusercontent.com/Rung-Asus/Knock/develop"
-df=$id/"develop"
-cm="\xE2\x9C\x94"
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jun-06] #
+#----------------------------------------#
+readonly ADDONS_DIR="/jffs/addons"
+readonly SCRIPTS_DIR="/jffs/scripts"
+readonly INSTALL_DIR="${ADDONS_DIR}/knock.d"
+readonly scriptFLink="$(readlink -f "$0")"
+readonly optConfFile="${INSTALL_DIR}/$scriptConfig"
+readonly configFPath="${INSTALL_DIR}/$pKnockConfig"
+readonly savedConfig="${TEMP_DIR}/$pKnockConfig"
+readonly iptFW1="${TEMP_DIR}/${scriptFNameTag}_iptables1.txt"
+readonly iptFW2="${TEMP_DIR}/${scriptFNameTag}_iptables2.txt"
+readonly versionFile="${INSTALL_DIR}/version.txt"
+readonly shScriptFile="${SCRIPTS_DIR}/knock.sh"
+readonly profileAdd="/jffs/configs/profile.add"
+readonly usbPostMount="${SCRIPTS_DIR}/post-mount"
+readonly firewallStart="${SCRIPTS_DIR}/firewall-start"
+readonly servicesStart="${SCRIPTS_DIR}/services-start"
+readonly developFlag="${INSTALL_DIR}/develop"
+readonly cm="\xE2\x9C\x94"
 
-#Fixes for new version of Screen
-# credit to Tailmon and Martinski W.
+readonly REPO_URL="https://raw.githubusercontent.com/Rung-Asus/Knock"
+readonly gitURL_MAIN="${REPO_URL}/main"
+readonly gitURL_DEVL="${REPO_URL}/develop"
+gitURL_REPO="$gitURL_MAIN"
+
+# Workaround for Entware ELF binaries compiled with RUNPATH #
 unset LD_LIBRARY_PATH
 [ "$HOME" != "/root" ] && export HOME="/root"
 export SCREENDIR="${HOME}/.screen"
+
+#To optionally use Entware screen utility#
+useEntwareScreen=false
 
 #----------------------------------------#
 # Modified by Martinski W. [2026-May-17] #
@@ -409,11 +430,11 @@ PromptYN()
 		printf "$promptStr "
 		read -r yesORno
 		case "$yesORno" in
-			[Nn]|No|no) yesORno=NO
+			[Nn]|No|no) yesORno=No
 				retCode=1
 				break
 				;;
-			[Yy]|Yes|yes) yesORno=YES
+			[Yy]|Yes|yes) yesORno=Yes
 				retCode=0
 				break
 				;;
@@ -476,10 +497,11 @@ _LogMsg_()
 #-------------------------------------#
 # Added by Martinski W. [2026-May-31] #
 #-------------------------------------#
-readonly protoFLregex="[:](T(CP)?|U(DP)?)"
 readonly portNUMregex="[1-9][0-9]{3,4}"
+readonly protoFLregex="[:](T(CP)?|U(DP)?)"
 readonly portT01regex="${portNUMregex}:T"
 readonly portU01regex="${portNUMregex}:U"
+readonly portTAGregex="${portNUMregex}_(TCP|UDP)"
 readonly portDEFregex="${portNUMregex}(${protoFLregex})?"
 
 #-------------------------------------#
@@ -547,6 +569,78 @@ _ValidatePortNumber_()
 #-------------------------------------#
 # Added by Martinski W. [2026-May-31] #
 #-------------------------------------#
+_CheckForDuplicatePorts_()
+{
+    local taggedPort  dupPortFound=false
+    local tmpPortLIST  pNumber  foundCount  tagPortLIST
+
+    dupPortLIST="" ; tagPortLIST=""
+
+    for pNumber in $fullPortLIST
+    do
+        taggedPort="$(_GetTaggedPortNumber_ "$pNumber")"
+        tagPortLIST="${tagPortLIST:+$tagPortLIST }$taggedPort"
+    done
+    fullPortLIST="$tagPortLIST"
+
+    tmpPortLIST="$(echo "$fullPortLIST" | awk -v RS=' ' '{print}')"
+
+    for pNumber in $fullPortLIST
+    do
+        foundCount="$(echo "$tmpPortLIST" | grep -cw "\b${pNumber}\b")"
+        if [ "$foundCount" -gt 1 ]
+        then
+            dupPortFound=true
+            tmpPortLIST="$(echo "$tmpPortLIST" | grep -vw "\b${pNumber}\b")"
+            dupPortLIST="${dupPortLIST:+$dupPortLIST }$pNumber"
+            "$isVerboseMode" && \
+            _LogMsg_ "**ERROR**: Duplicate port [${pNumber//_/:}] found in the configuration file" "$pLogERROR"
+        fi
+    done
+
+    "$dupPortFound" && return 0 || return 1
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-May-31] #
+#-------------------------------------#
+_CheckDupPortFound_()
+{
+    if [ $# -eq 0 ] || [ -z "$1" ]
+    then return 0
+    fi
+    local tmpPortList=""  logARG=""
+    local taggedPort  findCount  dupPortFound=false
+
+    if [ $# -gt 1 ] && [ -n "$2" ] && \
+       echo "$2" | grep -qE '^(NOLOG|silent)$'
+    then logARG="$2"
+    fi
+
+    taggedPort="$(_GetTaggedPortNumber_ "$1")"
+    if [ "${#dupPortLIST}" -gt 0 ] && \
+       echo "$dupPortLIST" | grep -qw "\b${taggedPort}\b"
+    then
+        [ "$logARG" != "silent" ] && \
+        _LogMsg_ "**ERROR**: Duplicate port [$1] was found" "$pLogERROR" "$logARG"
+        return 0
+    fi
+
+    [ "${#fullPortLIST}" -eq 0 ] && return 0
+    tmpPortList="$(echo "$fullPortLIST" | awk -v RS=' ' '{print}')"
+    findCount="$(echo "$tmpPortList" | grep -cw "\b${taggedPort}\b")"
+    if [ "$findCount" -gt 1 ]
+    then
+        [ "$logARG" != "silent" ] && \
+        _LogMsg_ "**ERROR**: Duplicate port [$1] was found" "$pLogERROR" "$logARG"
+        return 0
+    fi
+    return 1
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-May-31] #
+#-------------------------------------#
 _CheckInterface_()
 {
     local logARG=""
@@ -584,51 +678,265 @@ _NormalizeCSVList_()
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-May-31] #
+# Modified by Martinski W. [2026-Jun-06] #
 #----------------------------------------#
 #Verify everything is in its place#
 CheckInstall()
 {
-	[ -s "$sf" ] || return 1
-	[ -x /opt/sbin/screen ] || return 1
-	[ -s "$cf" ] || return 1
-	[ -s "$pm" ] || return 1
-	grep -q "knock.sh" "$pm" || return 1
-	[ -s "$fs" ] || return 1
-	grep -q "knock.sh" "$fs" || return 1
-	[ -s "$pa" ] || return 1
-	grep -q "knock.sh" "$pa" || return 1
+	if "$useEntwareScreen"
+	then
+		if [ ! -x /opt/sbin/screen ] || \
+		   [ ! -s "$usbPostMount" ]  || \
+		   ! grep -q "/knock.sh" "$usbPostMount"
+		then return 1
+		fi
+	else
+		if [ ! -s "$servicesStart" ] || \
+		   ! grep -q "/knock.sh" "$servicesStart"
+		then return 1
+		fi
+	fi
+
+	if [ ! -s "$shScriptFile" ]  || \
+	   [ ! -s "$configFPath" ]   || \
+	   [ ! -s "$profileAdd" ]    || \
+	   [ ! -s "$firewallStart" ] || \
+	   ! grep -q "/knock.sh" "$profileAdd" || \
+	   ! grep -q "/knock.sh" "$firewallStart"
+	then return 1
+	fi
+
 	return 0
 }
 
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jun-06] #
+#----------------------------------------#
 #Verify knock rules are in firewall and knock.sh is running#
 CheckStatus()
 {
+	if "$useEntwareScreen"
+	then
+		if ! /opt/sbin/screen -ls knock >/dev/null
+		then return 1
+		fi
+	else
+		if ! top -bn1 | grep -qE '/[k]nock.sh -loop'
+		then return 1
+		fi
+	fi
 	iptables -S INPUT | grep -q '\bknock.sh' || return 1
-	/opt/sbin/screen -ls knock >/dev/null || return 1
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-May-31] #
+#-------------------------------------#
+_CheckConfigurationFile_()
+{
+    local cfgLINE  thePORTx  theIFACE  theCMDx
+    local portNumOK  activeIFaceOK  errorFound=false
+    local portIFacesLst  portNumSeqLst  portListCount
+    local isVerboseMode=true  silentARG=""
+
+    if [ $# -gt 0 ] && [ "$1" = "silent" ]
+    then
+        silentARG="$1" ; isVerboseMode=false
+    fi
+
+    if [ ! -s "$configFPath" ]
+    then
+        "$isVerboseMode" && \
+	    _LogMsg_ "**ERROR**: Missing configuration file [$configFPath]" "$pLogERROR"
+	    return 1
+    fi
+
+    #To Check for Duplicate Ports#
+    fullPortLIST=""  dupPortLIST=""
+
+    while read -r cfgLINE
+    do
+        if [ -z "$cfgLINE" ] || \
+           echo "$cfgLINE" | grep -qE "^[[:blank:]]*[#].*"
+        then continue  #SKIP#
+        fi
+        cfgLINE="$(echo "$cfgLINE" | sed 's/  \+/  /')"
+        thePORTx="$(echo "$cfgLINE" | awk -F' ' '{print $1}')"
+        theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
+        theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
+
+        if [ -z "$thePORTx" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
+        then
+            errorFound=true
+            "$isVerboseMode" && \
+            _LogMsg_ "**ERROR**: The port knock entry [$cfgLINE] is INVALID" "$pLogERROR"
+            continue
+        fi
+
+        thePORTx="$(_NormalizeCSVList_ "$thePORTx")"
+        theIFACE="$(_NormalizeCSVList_ "$theIFACE")"
+        portIFacesLst="$(echo "$theIFACE" | tr ',' ' ')"
+        portNumSeqLst="$(echo "$thePORTx" | tr ',' ' ')"
+        portListCount="$(echo "$thePORTx" | awk -F',' '{print NF}')"
+        fullPortLIST="${fullPortLIST:+$fullPortLIST }$portNumSeqLst"
+        activeIFaceOK=true ; portNumOK=true
+
+        for pIFace in $portIFacesLst
+        do
+            if ! _CheckInterface_ "$pIFace" "$silentARG"
+            then activeIFaceOK=false
+            fi
+        done
+        for pNumber in $portNumSeqLst
+        do
+            if ! _ValidatePortNumber_ "$pNumber" "$silentARG"
+            then portNumOK=false
+            fi
+        done
+
+        if [ "$portListCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
+        then
+            portNumOK=false
+            "$isVerboseMode" && \
+            _LogMsg_ "**ERROR**: INVALID number of ports [$thePORTx] found" "$pLogERROR"
+        fi
+
+        if [ "$portNumOK" = "false" ] || \
+           [ "$activeIFaceOK" = "false" ]
+        then
+            errorFound=true
+            "$isVerboseMode" && \
+            _LogMsg_ "**ERROR**: The port knock entry [$cfgLINE] is INVALID" "$pLogERROR"
+            "$isVerboseMode" && echo
+        fi
+    done < "$configFPath"
+
+    if _CheckForDuplicatePorts_
+    then errorFound=true
+    fi
+
+    if "$errorFound"
+    then
+        "$isVerboseMode" && \
+        _LogMsg_ "**ERROR**: Configuration file [$configFPath] contains some errors" "$pLogERROR"
+        "$isVerboseMode" && echo
+    fi
+
+    return 0
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-06] #
+#-------------------------------------#
+_CreateCustomFirewallRules_()
+{
+	local fullPortLIST=""  dupPortLIST=""
+	local cfgLINE  thePORTS  theIFACE  theCMDx 
+	local portIFacesLst  portNumSeqLst  portListCount
+	local activeIFaceOK  portNumOK  pIFace  pNumber  thePort
+	local isVerboseMode=true  silentARG=""
+
+    if [ $# -gt 0 ] && [ "$1" = "silent" ]
+    then
+        silentARG="$1" ; isVerboseMode=false
+    fi
+
+	if ! _CheckConfigurationFile_ "$silentARG"
+	then return 1
+	fi
+
+	"$isVerboseMode" && \
+	_LogMsg_ "Adding port knocking rules to firewall" "$pLogWARNG"
+	"$isVerboseMode" && echo
+
+	while read -r cfgLINE
+	do
+		if [ -z "$cfgLINE" ] || \
+		   echo "$cfgLINE" | grep -qE "^[[:blank:]]*[#].*"
+		then continue  #SKIP#
+		fi
+		cfgLINE="$(echo "$cfgLINE" | sed 's/  \+/  /')"
+		thePORTS="$(echo "$cfgLINE" | awk -F' ' '{print $1}')"
+		theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
+		theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
+
+		if [ -z "$thePORTS" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
+		then continue  #INVALID#
+		fi
+
+		thePORTS="$(_NormalizeCSVList_ "$thePORTS")"
+		theIFACE="$(_NormalizeCSVList_ "$theIFACE")"
+		portIFacesLst="$(echo "$theIFACE" | tr ',' ' ')"
+		portNumSeqLst="$(echo "$thePORTS" | tr ',' ' ')"
+		portListCount="$(echo "$thePORTS" | awk -F',' '{print NF}')"
+		activeIFaceOK=true ; portNumOK=true
+
+		for IFace in $portIFacesLst
+		do
+			if ! _CheckInterface_ "$IFace" silent
+			then activeIFaceOK=true   #Allow FW Rule for INACTIVE IFace??#
+			fi
+		done
+
+		for pNumber in $portNumSeqLst
+		do
+			if ! _ValidatePortNumber_ "$pNumber" silent
+			then portNumOK=false
+			fi
+			if _CheckDupPortFound_ "$pNumber" silent
+			then portNumOK=false
+			fi
+		done
+
+		if [ "$portNumOK" = "false" ] || \
+		   [ "$activeIFaceOK" = "false" ] || \
+		   [ "$portListCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
+		then continue  #INVALID#
+		fi
+
+		for thePort in $portNumSeqLst
+		do
+			portN="$(echo "$thePort" | awk -F':' '{print $1}')"
+			proto="$(echo "$thePort" | awk -F':' '{print $2}')"
+
+			if [ -z "$proto" ] || [ "$proto" = "T" ]
+			then proto="tcp"
+			elif [ "$proto" = "U" ]
+			then proto="udp"
+			else proto="$(echo "$proto" | tr 'UDTCP' 'udtcp')"
+			fi
+
+			for IFace in $portIFacesLst
+			do
+				iptables -D INPUT -i "$IFace" -p "$proto" -m "$proto" --dport "$portN" -j LOG --log-prefix "knock.sh " --log-level info 2>/dev/null
+				iptables -I INPUT -i "$IFace" -p "$proto" -m "$proto" --dport "$portN" -j LOG --log-prefix "knock.sh " --log-level info
+			done
+		done
+	done < "$configFPath"
+
 	return 0
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-01] #
+# Modified by Martinski W. [2026-Jun-06] #
 #----------------------------------------#
-#Verify no missing firewall rules
+#Verify no missing firewall rules#
 CheckFirewall()
 {
 	local fullPortLIST=""  dupPortLIST=""
+	local cfgLINE  thePORTS  theIFACE  theCMDx
 	local portIFacesLst  portNumSeqLst  portListCount
-	local activeIFaceOK  portNumOK  pIFace  pNumber
-	local tempFWR="/tmp/var/${scriptFNameTag}_FWRules.TMP"
+	local activeIFaceOK  portNumOK  pIFace  pNumber  thePort
+	local pkTempFWR="${TEMP_DIR}/${scriptFNameTag}_FWRulesPK.TMP"
 
 	if ! _CheckConfigurationFile_ silent
 	then return 1
 	fi
 
-	#Save current firewall knock rules#
-	iptables -S INPUT | grep '\bknock.sh' > "$ff1"
+	#Save current firewall port knock rules#
+	iptables -S INPUT | grep '\bknock.sh' > "$iptFW1"
 
-	printf '' > "$ff2"
-	printf '' > "$tempFWR"
+	printf '' > "$iptFW2"
+	printf '' > "$pkTempFWR"
 
 	#Recreate rules from config file#
 	while read -r cfgLINE
@@ -672,7 +980,7 @@ CheckFirewall()
 
 		if [ "$portNumOK" = "false" ] || \
 		   [ "$activeIFaceOK" = "false" ] || \
-		   [ "$portListCount" -gt 2 ]
+		   [ "$portListCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
 		then continue  #INVALID#
 		fi
 
@@ -692,27 +1000,34 @@ CheckFirewall()
 			do
 			{
 			    echo "-A INPUT -i $IFace -p $proto -m $proto --dport $portN -j LOG --log-prefix \"knock.sh \" --log-level 6"
-			} >> "$tempFWR"
+			} >> "$pkTempFWR"
 			done
 		done
-	done < "$cf"
+	done < "$configFPath"
 
 	#FW Rules in REVERSE order for comparison#
-	awk '{lines[NR]=$0} END {for (idx=NR; idx>0; idx--) print lines[idx]}' "$tempFWR" > "$ff2"
-	rm -f "$tempFWR"
+	awk '{lines[NR]=$0} END {for (idx=NR; idx>0; idx--) print lines[idx]}' "$pkTempFWR" > "$iptFW2"
+	rm -f "$pkTempFWR"
 
 	#Files should match#
-	if cmp -s "$ff1" "$ff2"
-	then return 0
-	else return 1
+	if cmp -s "$iptFW1" "$iptFW2"
+	then
+		rm -f "$iptFW1" "$iptFW2"
+		return 0
 	fi
+	return 1
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-01] #
+# Modified by Martinski W. [2026-Jun-06] #
 #----------------------------------------#
 ShowStatus()
 {
+	local isFirewallOK=false
+	printf "\nPlease wait..."
+	CheckFirewall && isFirewallOK=true
+	printf "\r"
+
 	dashes="$(head -c 48 < /dev/zero | tr '\0' '-')"
 	printf "${dashes}\n"
 	printf "| Knock.sh: Router Commands for non-admin users\t|\n"
@@ -731,7 +1046,7 @@ ShowStatus()
 		printf "|     Run Status: Knock ${REDct}STOPPED${CLEARct}\t\t\t|\n"
 	fi
 	printf "${dashes}\n"
-	if CheckFirewall
+	if "$isFirewallOK"
 	then
 		printf "|Firewall Status: ${GREENct}All rules in place${CLEARct}\t\t|\n"
 	else
@@ -765,28 +1080,28 @@ UpdateScript()
 	clear
 	banner
 
-	if [ -f "$df" ]
+	if [ -f "$developFlag" ]
 	then
 		echo "On develop branch."
-		giturl="$giturld"
+		gitURL_REPO="$gitURL_DEVL"
 	fi
-	rm "$vf" 2>/dev/null
+	rm -f "$versionFile" 2>/dev/null
 
-	_DownloadFileFromRepo_ "${giturl}/version.txt" "$vf"
-	if [ -s "$vf" ]
+	_DownloadFileFromRepo_ "${gitURL_REPO}/version.txt" "$versionFile"
+	if [ -s "$versionFile" ]
 	then
-		nv="$(cat "$vf" | head -n 1)"
+		nv="$(cat "$versionFile" | head -n1)"
 		echo "Latest version: $nv"
 		echo "Current version: $REV"
 		if PromptYN "Proceed with update? (y/n):"
 		then
 			echo -e "\nDownloading..."
-			_DownloadFileFromRepo_ "${giturl}/knock.sh" "$sf"
-			chmod 755 "$sf"
+			_DownloadFileFromRepo_ "${gitURL_REPO}/knock.sh" "$shScriptFile"
+			chmod 755 "$shScriptFile"
 			echo "Installing..."
-			$sf -install -force
+			$shScriptFile -install -force
 			echo "Restarting..."
-			$sf -start -nobanner
+			$shScriptFile -start -nobanner
 			echo "Update completed."
 			echo
 			echo -e "Knock version:\t$REV"
@@ -797,14 +1112,14 @@ UpdateScript()
 			return 1
 		fi
 	else
-		echo "Error: network issue"
+		echo "**ERROR**: network issue"
 		return 1
 	fi
 	return 0
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-May-31] #
+# Modified by Martinski W. [2026-Jun-06] #
 #----------------------------------------#
 EditPortKnockConfig()
 {
@@ -877,7 +1192,7 @@ EditPortKnockConfig()
 			then allGood=false
 			fi
 		done
-		if [ "$portCount" -gt 2 ]
+		if [ "$portCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
 		then
 			allGood=false
 			_LogMsg_ "**ERROR**: INVALID number of ports [$st] found" "$pLogERROR" NOLOG
@@ -926,7 +1241,7 @@ EditPortKnockConfig()
 	selectEdit=""
 	#Check Duplicate Ports#
 	fullPortLIST="" ; dupPortLIST=""
-	tempPKnockRules="/tmp/var/${scriptFNameTag}_Rules.TMP"
+	tempPKnockRules="${TEMP_DIR}/${scriptFNameTag}_PKRules.TMP"
 
 	while read -r thePORTS theIFACE theCMDx
 	do
@@ -952,7 +1267,7 @@ EditPortKnockConfig()
 		else
 			lastComment="$(echo "$thePORTS $theIFACE $theCMDx" | cut -c 2- | sed 's/^ *//')"
 		fi
-	done < "$cf"
+	done < "$configFPath"
 	commandCount="$commandNum"
 
 	#Edit menu loop#
@@ -1008,7 +1323,7 @@ EditPortKnockConfig()
 					fi
 				done
 
-				if [ "$portListCount" -gt 2 ]
+				if [ "$portListCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
 				then
 					portNumOK=false
 					_LogMsg_ "**ERROR**: INVALID number of ports [$kPorts] found" "$pLogERROR" NOLOG
@@ -1023,7 +1338,7 @@ EditPortKnockConfig()
 				fi
 
 				#Display URLs#
-				portN1="$(echo "$kPorts" | awk -F',' '{print $1}')"
+				portNx="$(echo "$kPorts" | awk -F',' '{print $1}')"
 				pIFace="$(echo "$IFaces" | awk -F',' '{print $1}')"
 				IFaceIPaddr="$(_Get_IFace_IPAddress_ "$pIFace")"
 
@@ -1031,13 +1346,20 @@ EditPortKnockConfig()
 				then printf "\tURL to send port knock: "
 				else printf "\tURL to initiate port knock sequence: "
 				fi
-				printf "http://%s:%s\n" "$IFaceIPaddr" "$portN1"
+				printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx"
 
 				if [ "$portListCount" -gt 1 ]
 				then
-					portN2="$(echo "$kPorts" | awk -F',' '{print $2}')"
-					printf "\t\tWait $((INTERVAL * 3)) seconds to complete sequence and send command: " 
-					printf "http://%s:%s\n" "$IFaceIPaddr" "$portN2"
+					pNumber=1
+					while [ "$((++pNumber))" -le "$portListCount" ]
+					do
+						portNx="$(echo "$portNumSeqLst" | awk -v fn="$pNumber" -F' ' '{print $fn}')"
+						if [ "$pNumber" -lt "$portListCount" ]
+						then printf "\t\tWait $((INTERVAL * 3)) seconds to send next port knock: "
+						else printf "\t\tWait $((INTERVAL * 3)) seconds to complete knock sequence: "
+						fi
+						printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx"
+					done
 				fi
 				echo
 			done
@@ -1209,8 +1531,8 @@ EditPortKnockConfig()
 		if PromptYN
 		then
 			echo -en "\nSaving configuration"
-			echo "#knock.sh configuration file" > "$cf"
-			echo -e "\n#Format Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]\n" >> "$cf"
+			echo "#knock.sh configuration file" > "$configFPath"
+			echo -e "\n#Format Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]\n" >> "$configFPath"
 
 			#Write virtual array back to config file#
 			commandNum=0
@@ -1218,13 +1540,13 @@ EditPortKnockConfig()
 			do
 				commandNum="$((commandNum + 1))"
 				echo -n "..."$commandNum
-				echo "$(eval echo \"#\$comment$commandNum\")" >> "$cf"
-				echo $(eval echo \"\$ports$commandNum \$interfaces$commandNum \$cmd$commandNum\") >> "$cf"
-				echo >> "$cf"
+				echo "$(eval echo \"#\$comment$commandNum\")" >> "$configFPath"
+				echo $(eval echo \"\$ports$commandNum \$interfaces$commandNum \$cmd$commandNum\") >> "$configFPath"
+				echo >> "$configFPath"
 			done
 			echo -e "\n\nNew config file:"
 			echo "$dashes"
-			more "$cf"
+			more "$configFPath"
 			echo "$dashes"
 			_PressAnyKey_
 		else
@@ -1242,177 +1564,11 @@ EditPortKnockConfig()
 	return 0
 }
 
-#-------------------------------------#
-# Added by Martinski W. [2026-May-31] #
-#-------------------------------------#
-_CheckForDuplicatePorts_()
-{
-    local taggedPort  dupPortFound=false
-    local tmpPortLIST  pNumber  foundCount  tagPortLIST
-
-    dupPortLIST="" ; tagPortLIST=""
-
-    for pNumber in $fullPortLIST
-    do
-        taggedPort="$(_GetTaggedPortNumber_ "$pNumber")"
-        tagPortLIST="${tagPortLIST:+$tagPortLIST }$taggedPort"
-    done
-    fullPortLIST="$tagPortLIST"
-
-    tmpPortLIST="$(echo "$fullPortLIST" | awk -v RS=' ' '{print}')"
-
-    for pNumber in $fullPortLIST
-    do
-        foundCount="$(echo "$tmpPortLIST" | grep -cw "\b${pNumber}\b")"
-        if [ "$foundCount" -gt 1 ]
-        then
-            dupPortFound=true
-            tmpPortLIST="$(echo "$tmpPortLIST" | grep -vw "\b${pNumber}\b")"
-            dupPortLIST="${dupPortLIST:+$dupPortLIST }$pNumber"
-            "$isVerboseMode" && \
-            _LogMsg_ "**ERROR**: Duplicate port [${pNumber//_/:}] found in the configuration file" "$pLogERROR"
-        fi
-    done
-
-    "$dupPortFound" && return 0 || return 1
-}
-
-#-------------------------------------#
-# Added by Martinski W. [2026-May-31] #
-#-------------------------------------#
-_CheckDupPortFound_()
-{
-    if [ $# -eq 0 ] || [ -z "$1" ]
-    then return 0
-    fi
-    local tmpPortList=""  logARG=""
-    local taggedPort  findCount  dupPortFound=false
-
-    if [ $# -gt 1 ] && [ -n "$2" ] && \
-       echo "$2" | grep -qE '^(NOLOG|silent)$'
-    then logARG="$2"
-    fi
-
-    taggedPort="$(_GetTaggedPortNumber_ "$1")"
-    if [ "${#dupPortLIST}" -gt 0 ] && \
-       echo "$dupPortLIST" | grep -qw "\b${taggedPort}\b"
-    then
-        [ "$logARG" != "silent" ] && \
-        _LogMsg_ "**ERROR**: Duplicate port [$1] was found" "$pLogERROR" "$logARG"
-        return 0
-    fi
-
-    [ "${#fullPortLIST}" -eq 0 ] && return 0
-    tmpPortList="$(echo "$fullPortLIST" | awk -v RS=' ' '{print}')"
-    findCount="$(echo "$tmpPortList" | grep -cw "\b${taggedPort}\b")"
-    if [ "$findCount" -gt 1 ]
-    then
-        [ "$logARG" != "silent" ] && \
-        _LogMsg_ "**ERROR**: Duplicate port [$1] was found" "$pLogERROR" "$logARG"
-        return 0
-    fi
-    return 1
-}
-
-#-------------------------------------#
-# Added by Martinski W. [2026-May-31] #
-#-------------------------------------#
-_CheckConfigurationFile_()
-{
-    if [ ! -s "$cf" ]
-    then
-	    _LogMsg_ "**ERROR**: Missing configuration file [$cf]" "$pLogERROR"
-	    return 1
-    fi
-    local cfgLINE  thePORTx  theIFACE  theCMDx
-    local portNumOK  activeIFaceOK  errorFound=false
-    local portIFacesLst  portNumSeqLst  portListCount
-    local isVerboseMode=true  silentARG=""
-
-    if [ $# -gt 0 ] && [ "$1" = "silent" ]
-    then
-        silentARG="$1" ; isVerboseMode=false
-    fi
-
-    #To Check for Duplicate Ports#
-    fullPortLIST=""  dupPortLIST=""
-
-    while read -r cfgLINE
-    do
-        if [ -z "$cfgLINE" ] || \
-           echo "$cfgLINE" | grep -qE "^[[:blank:]]*[#].*"
-        then continue  #SKIP#
-        fi
-        cfgLINE="$(echo "$cfgLINE" | sed 's/  \+/  /')"
-        thePORTx="$(echo "$cfgLINE" | awk -F' ' '{print $1}')"
-        theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
-        theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
-
-        if [ -z "$thePORTx" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
-        then
-            errorFound=true
-            "$isVerboseMode" && \
-            _LogMsg_ "**ERROR**: The port knock entry [$cfgLINE] is INVALID" "$pLogERROR"
-            continue
-        fi
-
-        thePORTx="$(_NormalizeCSVList_ "$thePORTx")"
-        theIFACE="$(_NormalizeCSVList_ "$theIFACE")"
-        portIFacesLst="$(echo "$theIFACE" | tr ',' ' ')"
-        portNumSeqLst="$(echo "$thePORTx" | tr ',' ' ')"
-        portListCount="$(echo "$thePORTx" | awk -F',' '{print NF}')"
-        fullPortLIST="${fullPortLIST:+$fullPortLIST }$portNumSeqLst"
-        activeIFaceOK=true ; portNumOK=true
-
-        for pIFace in $portIFacesLst
-        do
-            if ! _CheckInterface_ "$pIFace" "$silentARG"
-            then activeIFaceOK=false
-            fi
-        done
-        for pNumber in $portNumSeqLst
-        do
-            if ! _ValidatePortNumber_ "$pNumber" "$silentARG"
-            then portNumOK=false
-            fi
-        done
-
-        if [ "$portListCount" -gt 2 ]
-        then
-            portNumOK=false
-            "$isVerboseMode" && \
-            _LogMsg_ "**ERROR**: INVALID number of ports [$thePORTx] found" "$pLogERROR"
-        fi
-
-        if [ "$portNumOK" = "false" ] || \
-           [ "$activeIFaceOK" = "false" ]
-        then
-            errorFound=true
-            "$isVerboseMode" && \
-            _LogMsg_ "**ERROR**: The port knock entry [$cfgLINE] is INVALID" "$pLogERROR"
-            "$isVerboseMode" && echo
-        fi
-    done < "$cf"
-
-    if _CheckForDuplicatePorts_
-    then errorFound=true
-    fi
-
-    if "$errorFound"
-    then
-        "$isVerboseMode" && \
-        _LogMsg_ "**ERROR**: Configuration file [$cf] contains some errors" "$pLogERROR"
-        "$isVerboseMode" && echo
-    fi
-
-    return 0
-}
-
 ##-------------------------------------##
 ## Added by Martinski W. [2026-May-17] ##
 ##-------------------------------------##
 readonly knockMutexFLock_FD=564
-readonly knockMutexFLock_FN="/tmp/var/${scriptFNameTag}_Loop.FLOCK"
+readonly knockMutexFLock_FN="${TEMP_DIR}/${scriptFNameTag}_Loop.FLOCK"
 knockMutexFLock_OK=false  #DO NOT have FLock#
 
 _ReleaseMutexFLock_()
@@ -1531,7 +1687,7 @@ ShowConfig()
 				fi
 			done
 
-			if [ "$portListCount" -gt 2 ]
+			if [ "$portListCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
 			then
 				portNumOK=false
 				_LogMsg_ "**ERROR**: INVALID number of ports [$thePORTS] found" "$pLogERROR" NOLOG
@@ -1546,7 +1702,7 @@ ShowConfig()
 			fi
 
 			#Display URLs#
-			portN1="$(echo "$thePORTS" | awk -F',' '{print $1}')"
+			portNx="$(echo "$thePORTS" | awk -F',' '{print $1}')"
 			pIFace="$(echo "$theIFACE" | awk -F',' '{print $1}')"
 			IFaceIPaddr="$(_Get_IFace_IPAddress_ "$pIFace")"
 
@@ -1554,19 +1710,26 @@ ShowConfig()
 			then printf "\tURL to send port knock: "
 			else printf "\tURL to initiate port knock sequence: "
 			fi
-			printf "http://%s:%s\n" "$IFaceIPaddr" "$portN1"
+			printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx"
 
 			if [ "$portListCount" -gt 1 ]
 			then
-				portN2="$(echo "$thePORTS" | awk -F',' '{print $2}')"
-				printf "\t\tWait $((INTERVAL * 3)) seconds to complete sequence and send command: "
-				printf "http://%s:%s\n" "$IFaceIPaddr" "$portN2"
+				pNumber=1
+				while [ "$((++pNumber))" -le "$portListCount" ]
+				do
+					portNx="$(echo "$portNumSeqLst" | awk -v fn="$pNumber" -F' ' '{print $fn}')"
+					if [ "$pNumber" -lt "$portListCount" ]
+					then printf "\t\tWait $((INTERVAL * 3)) seconds to send next port knock: "
+					else printf "\t\tWait $((INTERVAL * 3)) seconds to complete knock sequence: "
+					fi
+					printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx"
+				done
 			fi
 			echo
 		else
 			lastComment="$(echo "$thePORTS $theIFACE $theCMDx" | cut -c 2- | sed 's/^ *//')"
 		fi
-	done < "$cf"
+	done < "$configFPath"
 }
 
 #-------------------------------------#
@@ -1604,7 +1767,7 @@ _WaitForCustomFirewallRules_()
 #-------------------------------------#
 # Added by Martinski W. [2026-Jun-02] #
 #-------------------------------------#
-_WaitForBackgroundScreenProcess_()
+_WaitForBackground_ScreenProcess_()
 {
     local sleepSecsNUM=0  sleepSecsMAX
 
@@ -1624,8 +1787,59 @@ _WaitForBackgroundScreenProcess_()
 }
 
 #-------------------------------------#
-# Added by Martinski W. [2026-May-31] #
+# Added by Martinski W. [2026-Jun-06] #
 #-------------------------------------#
+_StopBackground_ScreenProcess_()
+{
+	/opt/sbin/screen -S knock -X quit >/dev/null
+	sleep 4  #Allow time to terminate process#
+	if /opt/sbin/screen -ls knock >/dev/null
+	then return 1
+	else return 0
+	fi
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-06] #
+#-------------------------------------#
+_CheckForRogueBackground_ScreenProcess_()
+{
+	if [ -x /opt/sbin/screen ] && \
+	   /opt/sbin/screen -ls knock >/dev/null
+	then
+		printf "An existing background process must be stopped first. Please wait...\n"
+		_StopBackground_ScreenProcess_
+	fi
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-06] #
+#-------------------------------------#
+_StopBackground_DaemonProcess_()
+{
+	touch "$knockLoopDaemonSEM"
+	sleep 4  #Allow time to terminate process#
+	if top -bn1 | grep -qE '/[k]nock.sh -loop'
+	then return 1
+	else return 0
+	fi
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-06] #
+#-------------------------------------#
+_CheckForRogueBackground_DaemonProcess_()
+{
+	if top -bn1 | grep -qE '/[k]nock.sh -loop'
+	then
+		printf "An existing background process must be stopped first. Please wait...\n"
+		_StopBackground_DaemonProcess_
+	fi
+}
+
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jun-06] #
+#----------------------------------------#
 _StartBackgroundProcess_()
 {
 	if ! _CheckConfigurationFile_
@@ -1633,21 +1847,32 @@ _StartBackgroundProcess_()
 	fi
 
 	service restart_firewall >/dev/null
-    sleep 1
+	sleep 1
 
-	if [ -x /opt/sbin/screen ] && \
-	   /opt/sbin/screen -ls knock >/dev/null
-	then  #Make sure ONLY ONE background process is run#
-		printf "An existing background process must be stopped first. Please wait...\n"
-		/opt/sbin/screen -S knock -X quit >/dev/null
-		sleep 3  #Allow time to terminate process#
+	#Make sure ONLY ONE background process is run#
+	if "$useEntwareScreen"
+	then
+		_CheckForRogueBackground_ScreenProcess_
+	else
+		_CheckForRogueBackground_DaemonProcess_
 	fi
 
 	printf "Waiting to set firewall rules. Please wait...\n"
 	_WaitForCustomFirewallRules_ 5
-	printf "Starting knock.sh background process. Please wait...\n"
 
-	if $sf "-screen"
+	_LogMsg_ "Starting knock.sh background process" "$pLogWARNG"
+	printf "Please wait...\n"
+
+	if "$useEntwareScreen"
+	then
+		$shScriptFile "-screen"
+	else
+		nohup "$shScriptFile" -loop >/dev/null &
+		printf "Waiting for background process. Please wait...\n"
+		sleep 3
+	fi
+
+	if CheckStatus
 	then
 		if [ $# -eq 0 ] || [ -z "$1" ]
 		then
@@ -1665,19 +1890,98 @@ _StartBackgroundProcess_()
 	return 0
 }
 
-#-------------------------------------#
-# Added by Martinski W. [2026-May-31] #
-#-------------------------------------#
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jun-06] #
+#----------------------------------------#
 _StopBackgroundProcess_()
 {
 	if [ $# -eq 0 ] || [ -z "$1" ]
 	then
 		clear ; banner
 	fi
+	local bgProcStopOK=false
 	printf "\nStopping knock.sh background process. Please wait...\n"
-	/opt/sbin/screen -S knock -X quit >/dev/null
-	sleep 3  #Allow time to terminate process#
-	printf "Knock.sh background process stopped\n"
+
+	if "$useEntwareScreen"
+	then
+		_StopBackground_ScreenProcess_ && bgProcStopOK=true
+	else
+		_StopBackground_DaemonProcess_ && bgProcStopOK=true
+	fi
+
+	if "$bgProcStopOK"
+	then
+		printf "Knock.sh background process was stopped\n"
+		return 0
+	else
+		printf "Knock.sh background process was NOT stopped\n"
+		return 1
+	fi
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-07] #
+#-------------------------------------#
+_SetConfigOption_()
+{
+	if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "$2" ]
+	then return 1
+	fi
+	if [ ! -d "$INSTALL_DIR" ]
+	then
+		mkdir -p "$INSTALL_DIR"
+	fi
+	if [ ! -f "$optConfFile" ]
+	then
+		printf '' > "$optConfFile"
+	fi
+	chmod 644 "$optConfFile"
+
+	if ! grep -qE "^${1}=.*" "$optConfFile"
+	then
+		echo "${1}=$2" >> "$optConfFile"
+		return 0
+	fi
+	if ! grep -qE "^${1}=$2" "$optConfFile"
+	then
+		sed -i "s/${1}=.*/${1}=${2}/" "$optConfFile"
+		return 0
+	fi
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-07] #
+#-------------------------------------#
+_GetConfigOption_()
+{
+	if [ $# -eq 0 ] || [ -z "$1" ]
+	then echo ; return 1
+	fi
+	local keyPair  defValue=""
+
+	if [ $# -gt 1 ] && [ -n "$2" ]
+	then defValue="$2"
+	fi
+	if [ ! -d "$INSTALL_DIR" ]
+	then
+		echo "$defValue"
+		return 1
+	fi
+	if [ ! -f "$optConfFile" ]
+	then
+		printf '' > "$optConfFile"
+	fi
+	chmod 644 "$optConfFile"
+
+	keyPair="$(grep -m1 -E "^${1}=.*" "$optConfFile")"
+	if [ -z "$keyPair" ]
+	then
+		[ -n "$defValue" ] && \
+		echo "${1}=$defValue" >> "$optConfFile"
+		echo "$defValue"
+	else
+		echo "$keyPair" | cut -d'=' -f2
+	fi
 	return 0
 }
 
@@ -1692,6 +1996,8 @@ _InvalidMenuOptionHandler_()
 	printf "\n Select a valid menu option\n"
 	_PressAnyKey_
 }
+
+useEntwareScreen="$(_GetConfigOption_ USE_EW_SCREEN false)"
 
 #----------------------------------------#
 # Modified by Martinski W. [2026-May-24] #
@@ -1725,33 +2031,33 @@ then
 
 		case "$menuSelection" in
 			1)
-				$sf -install -force
-				_StopBackgroundProcess_ -nobanner >/dev/null
+				$shScriptFile -install -force
+				_StopBackgroundProcess_ -menu >/dev/null
 
 			if CheckInstall
 			then
-				if [ -f "$tf" ]
+				if [ -f "$savedConfig" ]
 				then
 					echo -ne "\t"
-					if PromptYN "Restore saved config file ($tf)? (y/n):"
+					if PromptYN "Restore saved config file ($savedConfig)? (y/n):"
 					then
 						echo -en "\n\tRestoring saved file..."
-						cp $tf $cf
-						echo -e $cm
+						cp -fp "$savedConfig" "$configFPath"
+						echo -e "$cm"
 					else
 						echo -e "\n\tKeeping default file."
 					fi
 				fi
 				printf "\nKnock.sh version $REV successfully installed!\n\n"
 
-				if PromptYN "Would you like to edit the config file now ($cf)? (y/n):"
+				if PromptYN "Would you like to edit the config file now ($configFPath)? (y/n):"
 				then
 					echo
-					$sf -edit -nobanner
+					$shScriptFile -edit -nobanner
 					if PromptYN "Are you ready to start processing knocks (start knock.sh)? (y/n):"
 					then
 						echo
-						$sf -start -nobanner
+						$shScriptFile -start -nobanner
 					else
 						printf "\nWhen ready, please run start from main menu\n"
 					fi
@@ -1761,12 +2067,13 @@ then
 				fi
 			fi
 				_PressAnyKey_
-				exec "$sf"
+				exec "$shScriptFile"
 				exit
 				;;
 			2)
-				sh "$sf" -uninstall
-				exit
+				$shScriptFile -uninstall && exit 0
+				_PressAnyKey_
+				continue
 				;;
 			[Ee]) break;;
 		esac
@@ -1783,11 +2090,11 @@ then
 				_PressAnyKey_
 				;;
 			4)
-				_StartBackgroundProcess_ -nobanner
+				_StartBackgroundProcess_ -menu
 				_PressAnyKey_
 				;;
 			5)
-				_StopBackgroundProcess_ -nobanner
+				_StopBackgroundProcess_ -menu
 				_PressAnyKey_
 				;;
 			6)
@@ -1797,10 +2104,10 @@ then
 					if PromptYN "Are you ready to start processing knocks (start knock.sh)? (y/n):"
 					then
 						echo
-						_StartBackgroundProcess_ -nobanner
+						_StartBackgroundProcess_ -menu
 					else
 						echo
-						_StopBackgroundProcess_ -nobanner
+						_StopBackgroundProcess_ -menu
 					fi
 				fi
 				_PressAnyKey_
@@ -1810,7 +2117,7 @@ then
 				then
 					_PressAnyKey_ "Press ANY key to restart knock.sh..."
 					clear
-					exec $sf
+					exec "$shScriptFile"
 					exit
 				else
 					_PressAnyKey_
@@ -1827,12 +2134,146 @@ then
 	exit
 fi
 
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-06] #
+#-------------------------------------#
+_CheckKnockWaitTimer_()
+{
+    if [ $# -eq 0 ] || [ -z "$1" ] ; then return 1 ; fi
+    if top -bn1 | grep -qE "/${knockWaitTimerName}_${1}.sh[ ]+"
+    then return 0
+    else return 1
+    fi
+}
+
+_StopKnockWaitTimer_()
+{
+    if [ $# -eq 0 ] || [ -z "$1" ] ; then return 1 ; fi
+    local waitPID
+    waitPID="$(top -bn1 | grep -E "/${knockWaitTimerName}_${1}.sh[ ]+")"
+    [ -z "$waitPID" ] && return 0
+    waitPID="$(echo "$waitPID" | awk -F' ' '{print $1}')"
+    kill -TERM "$waitPID" >/dev/null 2>&1
+    return 0
+}
+
+_StartKnockWaitTimer_()
+{
+    if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "$2" ]
+    then return 1
+    fi
+    # Make sure ONLY ONE timer per Port Knock #
+    _StopKnockWaitTimer_ "$1"
+    "$scriptFilePath" -waitTimer "$@"
+    return 0
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-06] #
+#-------------------------------------#
+_Create_KnockWaitTimer_BGScript_()
+{
+    cat << 'EOFT' > "$bgScript_FPath"
+#!/bin/sh
+#----------------------------------------------------
+# Initiate a port-specific knock sleep wait timer.
+#----------------------------------------------------
+set -u
+
+readonly scriptFileName="${0##*/}"
+readonly scriptFNameTag="${scriptFileName%%.*}"
+readonly logTagStr="${scriptFNameTag}_[$$]"
+readonly logDateTime="%Y-%b-%d %I:%M:%S %p %Z"
+readonly logFilePath="/tmp/var/tmp/${scriptFNameTag}.LOG"
+readonly isDebugFlag=false
+
+# Give priority to built-in binaries #
+export PATH="/bin:/usr/bin:/sbin:/usr/sbin:$PATH"
+
+_DoCleanUp_()
+{
+   rm -f "$logFilePath"
+   rm -f "$0"
+}
+
+trap '_DoCleanUp_ ; exit 0' INT QUIT ABRT TERM
+
+if [ $# -eq 0 ]
+then
+    logger -st "$logTagStr" -p 3 "**ERROR**: NO parameter. Exiting..."
+    exit 1
+fi
+
+if ! echo "$1" | grep -qE "^[1-9][0-9]{0,2}$" || \
+   [ "$1" -lt 5 ] || [ "$1" -gt 199 ]
+then
+    logger -st "$logTagStr" -p 3 "**ERROR**: INVALID wait seconds [$1]. Exiting..."
+    exit 1
+fi
+
+trap '' HUP
+echo "$$" > "$logFilePath"
+echo "$(date +"$logDateTime")" >> "$logFilePath"
+sleep "$1" & wait $!
+
+_DoCleanUp_
+exit 0
+
+#EOF#
+EOFT
+
+   chmod a+x "$bgScript_FPath"
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-06] #
+#-------------------------------------#
+_Launch_KnockWaitTimer_BGScript_()
+{
+    if [ $# -eq 0 ] || [ -z "$1" ] || [ -z "$2" ] || \
+       ! echo "$1" | grep -qE "^${portTAGregex}$" || \
+       ! echo "$2" | grep -qE "^[1-9][0-9]{0,2}$"
+    then return 1
+    fi
+    local bgScript_FName="${knockWaitTimerName}_${1}.sh"
+    local bgScript_FPath="${TEMP_DIR}/$bgScript_FName"
+
+    if [ -s "$bgScript_FPath" ] && [ -n "$(pidof "$bgScript_FName")" ]
+    then
+        _LogMsg_ "*WARNING*: Script [$bgScript_FName] is already running..." "$pLogWARNG"
+        return 1
+    fi
+
+    _Create_KnockWaitTimer_BGScript_
+
+    if [ ! -s "$bgScript_FPath" ] || [ ! -x "$bgScript_FPath" ]
+    then
+        _LogMsg_ "**ERROR**: Script [$bgScript_FPath] NOT found." "$pLogERROR"
+        return 1
+    fi
+
+    "$bgScript_FPath" "$2" & taskPID=$!
+    _LogMsg_ "INFO: Background script [$bgScript_FName] started. PID: [$taskPID]"
+
+    return 0
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-06] #
+#-------------------------------------#
+if [ "$1" = "-waitTimer" ]
+then
+	shift
+	_Launch_KnockWaitTimer_BGScript_ "$@"
+	exit 0
+fi
+
 if [ "$1" = "-status" ]
 then
-    clear
-    banner
-    ShowStatus
-    exit
+	clear
+	banner
+	ShowStatus
+	exit
 fi
 
 if [ "$1" = "-config" ]
@@ -1841,8 +2282,44 @@ then
 	exit 0
 fi
 
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-06] #
+#-------------------------------------#
+if [ "$1" = "-daemon" ]
+then
+	if [ ! -s "$shScriptFile" ]
+	then
+		_LogMsg_ "**ERROR**: knock.sh is not installed yet" "$pLogERROR"
+		exit 1
+	fi
+	if [ ! -s "$configFPath" ]
+	then
+		_LogMsg_ "**ERROR**: Missing configuration file [$configFPath]" "$pLogERROR"
+		exit 1
+	fi
+
+	_LogMsg_ "Starting knock.sh background process" "$pLogWARNG" NOECHO
+
+	#Stop any current rogue background process#
+	roguePID="$(top -bn1 | grep -E '/[k]nock.sh -loop')"
+	if [ -n "$roguePID" ]
+	then
+		touch "$knockLoopDaemonSEM"
+		roguePID="$(echo "$roguePID" | awk -F' ' '{print $1}')"
+		_LogMsg_ "Stopping knock.sh process [$roguePID] during restart" "$pLogWARNG"
+		sleep 4  #Allow time to terminate process#
+	fi
+
+	nohup "$shScriptFile" -loop >/dev/null &
+	printf "Waiting for background process. Please wait...\n"
+	sleep 3
+
+	_WaitForCustomFirewallRules_ 5
+	CheckStatus && exit 0 || exit 1
+fi
+
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-02] #
+# Modified by Martinski W. [2026-Jun-06] #
 #----------------------------------------#
 if [ "$1" = "-screen" ]
 then
@@ -1851,7 +2328,7 @@ then
 		_LogMsg_ "**ERROR**: Entware Screen app not installed" "$pLogERROR"
 		exit 1
 	fi
-	if [ ! -s "$sf" ]
+	if [ ! -s "$shScriptFile" ]
 	then
 		_LogMsg_ "**ERROR**: knock.sh is not installed yet" "$pLogERROR"
 		exit 1
@@ -1859,111 +2336,118 @@ then
 
 	_LogMsg_ "Starting knock.sh background process" "$pLogWARNG" NOECHO
 
+	#Stop any current rogue background process#
 	if /opt/sbin/screen -ls knock >/dev/null
-	then  #Stop the old process first#
+	then
 		/opt/sbin/screen -S knock -X quit >/dev/null
 		sleep 3  #Allow time to terminate process#
 	fi
 
 	#Kill rogue background process#
-	roguePID="$(ps w | grep -E '/[k]nock.sh -loop')"
+	roguePID="$(top -bn1 | grep -E '/[k]nock.sh -loop')"
 	if [ -n "$roguePID" ]
 	then
 		roguePID="$(echo "$roguePID" | awk -F' ' '{print $1}')"
 		kill -TERM "$roguePID" >/dev/null 2>&1
 		_LogMsg_ "Force killed knock.sh process [$roguePID] during restart" "$pLogWARNG"
-		sleep 2  #Allow time to terminate process#
+		sleep 3  #Allow time to terminate process#
 	fi
 
-	/opt/sbin/screen -dmS knock "$sf" -loop
+	/opt/sbin/screen -dmS knock "$shScriptFile" -loop
 	printf "Waiting for background process. Please wait...\n"
 
 	_WaitForCustomFirewallRules_ 5
-	_WaitForBackgroundScreenProcess_ 5
+	_WaitForBackground_ScreenProcess_ 5
 	CheckStatus && exit 0 || exit 1
 fi
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-May-31] #
+# Modified by Martinski W. [2026-Jun-06] #
 #----------------------------------------#
 if [ "$1" = "-firewall" ]
 then
-	fullPortLIST="" ; dupPortLIST=""
-
-	if ! _CheckConfigurationFile_
-	then exit 1
-	fi
-	_LogMsg_ "Adding port knocking rules to firewall" "$pLogWARNG"
-	echo
-
-	while read -r cfgLINE
-	do
-		if [ -z "$cfgLINE" ] || \
-		   echo "$cfgLINE" | grep -qE "^[[:blank:]]*[#].*"
-		then continue  #SKIP#
-		fi
-		cfgLINE="$(echo "$cfgLINE" | sed 's/  \+/  /')"
-		thePORTS="$(echo "$cfgLINE" | awk -F' ' '{print $1}')"
-		theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
-		theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
-
-		if [ -z "$thePORTS" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
-		then continue  #INVALID#
-		fi
-
-		thePORTS="$(_NormalizeCSVList_ "$thePORTS")"
-		theIFACE="$(_NormalizeCSVList_ "$theIFACE")"
-		portIFacesLst="$(echo "$theIFACE" | tr ',' ' ')"
-		portNumSeqLst="$(echo "$thePORTS" | tr ',' ' ')"
-		portListCount="$(echo "$thePORTS" | awk -F',' '{print NF}')"
-		activeIFaceOK=true ; portNumOK=true
-
-		for IFace in $portIFacesLst
-		do
-			if ! _CheckInterface_ "$IFace" silent
-			then activeIFaceOK=true   #Allow FW Rule for INACTIVE IFace??#
-			fi
-		done
-
-		for pNumber in $portNumSeqLst
-		do
-			if ! _ValidatePortNumber_ "$pNumber" silent
-			then portNumOK=false
-			fi
-			if _CheckDupPortFound_ "$pNumber" silent
-			then portNumOK=false
-			fi
-		done
-
-		if [ "$portNumOK" = "false" ] || \
-		   [ "$activeIFaceOK" = "false" ] || \
-		   [ "$portListCount" -gt 2 ]
-		then continue  #INVALID#
-		fi
-
-		for thePort in $portNumSeqLst
-		do
-			portN="$(echo "$thePort" | awk -F':' '{print $1}')"
-			proto="$(echo "$thePort" | awk -F':' '{print $2}')"
-
-			if [ -z "$proto" ] || [ "$proto" = "T" ]
-			then proto="tcp"
-			elif [ "$proto" = "U" ]
-			then proto="udp"
-			else proto="$(echo "$proto" | tr 'UDTCP' 'udtcp')"
-			fi
-
-			for IFace in $portIFacesLst
-			do
-				iptables -D INPUT -i "$IFace" -p "$proto" -m "$proto" --dport "$portN" -j LOG --log-prefix "knock.sh " --log-level info 2>/dev/null
-				iptables -I INPUT -i "$IFace" -p "$proto" -m "$proto" --dport "$portN" -j LOG --log-prefix "knock.sh " --log-level info
-			done
-		done
-	done < "$cf"
-
+	_CreateCustomFirewallRules_
 	exit 0
 fi
 
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jun-07] #
+#----------------------------------------#
+_CheckForEntwareScreen_()
+{
+	printf "\tChecking for Entware..."
+	if [ ! -x /opt/bin/opkg ]
+	then
+		printf "\n**ERROR**: Entware NOT found. Please install Entware using the 'amtm' utility.\n"
+		return 1
+	fi
+	echo -e "$cm"
+
+	printf "\tChecking for Screen utility..."
+	if [ ! -x /opt/sbin/screen ]
+	then
+		if PromptYN "\n\nConfirm installing 'screen' utility? (y/n):"
+		then
+			echo
+			/opt/bin/opkg install screen
+			if [ ! -x /opt/sbin/screen ]
+			then
+				printf "\n**ERROR**: Entware screen installation failed\n\n"
+				return 1
+			fi
+		else
+			printf "\nCancelling installation\n\n"
+			return 1
+		fi
+		printf "\tScreen successfully installed."
+	fi
+	echo -e "$cm"
+	return 0
+}
+
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jun-06] #
+#----------------------------------------#
+_SetUpUSB_PostMount_()
+{
+	# Clean up services-start #
+	sed -i -e '/knock.sh/d' "$servicesStart"
+
+	echo -ne "\tUpdating post-mount file..."
+	if [ ! -s "$usbPostMount" ]
+	then
+		echo "#!/bin/sh" > "$usbPostMount"
+		echo >> "$usbPostMount"
+	fi
+	sed -i -e '/knock.sh/d' "$usbPostMount"
+	echo "(sleep 30 && $shScriptFile -screen) & # Added by knock.sh" >> "$usbPostMount"
+	chmod 755 "$usbPostMount"
+	echo -e "$cm"
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-06] #
+#-------------------------------------#
+_SetUpServicesStart_()
+{
+	# Clean up post-mount #
+	sed -i -e '/knock.sh/d' "$usbPostMount"
+
+	echo -ne "\tUpdating services-start file..."
+	if [ ! -s "$servicesStart" ]
+	then
+		echo "#!/bin/sh" > "$servicesStart"
+		echo >> "$servicesStart"
+	fi
+	sed -i -e '/knock.sh/d' "$servicesStart"
+	echo "(sleep 30 && $shScriptFile -daemon) & # Added by knock.sh" >> "$servicesStart"
+	chmod 755 "$servicesStart"
+	echo -e "$cm"
+}
+
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jun-07] #
+#----------------------------------------#
 if [ "$1" = "-install" ]
 then
 	if [ $# -lt 2 ] || [ -z "$2" ]
@@ -1978,58 +2462,51 @@ then
 		printf "\nInstalling knock.sh...\n"
 	fi
 
-	#Check run location#
-	if [ "$(dirname "$fn")" != "$js" ]
+	# Check run location #
+	if [ "$(dirname "$scriptFLink")" != "$SCRIPTS_DIR" ]
 	then
-		echo "Error: This script must be run from $js"
+		printf "**ERROR**: This script must be run from ${SCRIPTS_DIR}\n"
 		exit 1
 	fi
-	chmod 755 "$sf"
+	chmod 755 "$shScriptFile"
+	echo
 
-	#Check entware
-	echo -ne "\tChecking for Entware..."
-	if [ ! -f "/opt/bin/opkg" ]; then
-		echo -e "\nError: Knock.sh requires Entware. Please install Entware using the 'amtm' utility."
-		exit 1
+	if [ -x /opt/bin/opkg ] && [ -x /opt/sbin/screen ]
+	then action="use"
+	else action="install"
 	fi
-	echo -e $cm
 
-	#Check screen, optionally install
-	echo -ne "\tChecking for Screen utility..."
-	if [ ! -f "/opt/sbin/screen" ]
+	printf "\nYou have the option to install/use the Entware 'screen' utility.\n"
+	printf "It will replace the built-in background process used by the script.\n"
+	if PromptYN "Would you like to $action the optional Entware 'screen' utility? (y/n):"
+	then useEntwareScreen=true
+	else useEntwareScreen=false
+	fi
+	if "$useEntwareScreen"
 	then
-		printf "\n\nKnock.sh requires the Entware utility 'screen'\n"
-
-		if PromptYN "Proceed with installing 'screen'? (y/n):"
-		then
-			echo
-			opkg install screen
-			if [ ! -f "/opt/sbin/screen" ]; then
-				echo "Entware screen install failed"
-				exit 1
-			fi
-		else
-			echo
-			echo "Cancelling install"
-			exit 1
-		fi
-		echo -ne "\tScreen successfully installed."
+        if _CheckForEntwareScreen_
+        then useEntwareScreen=true
+        else useEntwareScreen=false
+        fi
 	fi
-	echo -e $cm
 
-	#Setup config file#
-	echo -ne "\tChecking config file..."
-	if [ ! -d "${jf}/addons" ]; then
-		echo -e "\nError: This script is designed for Asuswrt-Merlin firmware only"
+	# Set up config file #
+	echo -ne "\tChecking configuration file..."
+	if [ ! -d "$ADDONS_DIR" ]
+	then
+		printf "\n**ERROR**: This script is designed for Asuswrt-Merlin firmware only\n"
 		exit 1
 	fi
-	mkdir "$id" 2>/dev/null
-	echo -e $cm
+	mkdir -p "$INSTALL_DIR"
+	echo -e "$cm"
 
-	if [ ! -f "$cf" ]; then
-		echo -ne "\tCreating config file..."
+	_SetConfigOption_ USE_EW_SCREEN "$useEntwareScreen"
 
-		cat <<EOF > $cf
+	if [ ! -s "$configFPath" ]
+	then
+		echo -ne "\tCreating configuration file..."
+
+		cat <<EOF > "$configFPath"
 #knock.sh Example configuration file
 
 #Format Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]
@@ -2051,80 +2528,80 @@ then
 
 EOF
 
-		echo -e $cm
+		echo -e "$cm"
 
 		if [ $# -lt 2 ] || [ -z "$2" ]
 		then
 		    #Optionally restore saved config file, if it exists
-		 if [ -f $tf ]
+		 if [ -s "$savedConfig" ]
 		 then
 			echo -ne "\t"
-			if PromptYN "Restore saved config file ($tf)? (y/n):"
+			if PromptYN "Restore saved config file ($savedConfig)? (y/n):"
 			then
 				echo -en "\n\tRestoring saved file..."
-				cp $tf $cf
-				echo -e $cm
+				cp -fp "$savedConfig" "$configFPath"
+				echo -e "$cm"
+				rm -f "$savedConfig"
 			else
 				echo -e "\n\tKeeping default file."
 			fi
 		 fi
 		fi
 	fi
+	chmod 644 "$configFPath"
 
-	#Add post-mount command#
-	echo -ne "\tUpdating post-mount file..."
-	if [ ! -f $pm ]; then
-		echo "#!/bin/sh" > $pm
-		echo >> $pm
-		chmod 755 $pm
-	fi
-	sed -i -e '/knock.sh/d' $pm
-	echo "(sleep 30 &&" $sf "-screen) & # Added by knock.sh" >> $pm
-	echo -e $cm
-
-	#Add firewall-start command#
-	echo -ne "\tUpdating firewall-start file..."
-	if [ ! -f "$fs" ]
+	if "$useEntwareScreen"
 	then
-		echo "#!/bin/sh" > $fs
-		echo >> $fs
-		chmod 755 $fs
+		_SetUpUSB_PostMount_
+	else
+		_SetUpServicesStart_
 	fi
-	sed -i -e '/knock.sh/d' $fs
-	echo $sf "-firewall # Added by knock.sh" >> $fs
-	echo -e $cm
 
-	#add profile.add command#
-	echo -ne "\tUpdating profile.add file..."
-	if [ ! -f $pa ]; then
-		touch $pa
+	# Set up firewall-start #
+	echo -ne "\tUpdating firewall-start file..."
+	if [ ! -s "$firewallStart" ]
+	then
+		echo "#!/bin/sh" > "$firewallStart"
+		echo >> "$firewallStart"
 	fi
-	sed -i -e '/knock.sh/d' $pa
-	echo "alias knock=\"sh" $sf"\" # Added by knock.sh" >> $pa
-	echo -e $cm
+	sed -i -e '/knock.sh/d' "$firewallStart"
+	echo "$shScriptFile -firewall # Added by knock.sh" >> "$firewallStart"
+	chmod 755 "$firewallStart"
+	echo -e "$cm"
+
+	# Set up profile.add #
+	echo -ne "\tUpdating profile.add file..."
+	if [ ! -s "$profileAdd" ]
+	then
+		touch "$profileAdd"
+	fi
+	sed -i -e '/knock.sh/d' "$profileAdd"
+	echo "alias knock=\"sh $shScriptFile\" # Added by knock.sh" >> "$profileAdd"
+	chmod 644 "$profileAdd"
+	echo -e "$cm"
 
 	if [ $# -lt 2 ] || [ -z "$2" ]
 	then
 		printf "\nKnock.sh version $REV successfully installed!\n\n"
 
-		if PromptYN "Would you like to edit the config file now ($cf)? (y/n):"
+		if PromptYN "Would you like to edit the config file now ($configFPath)? (y/n):"
 		then
 			echo
-			$sf -edit -nobanner
+			$shScriptFile -edit -nobanner
 			if PromptYN "Are you ready to start processing knocks (start knock.sh)? (y/n):"
 			then
 				echo
-				$sf -start
+				$shScriptFile -start
 			else
 				echo -e "\nWhen ready, please run 'knock -start'"
 			fi
 		else
 			echo -e "\nPlease update the configuration file from the default ('knock -edit')"
-			echo ""
+			echo
 			echo "Once updated, please run 'knock -start' to begin processing knocks"
 		fi
 	fi
-	exit
+	exit 0
 fi
 
 #----------------------------------------#
@@ -2149,56 +2626,72 @@ then
 	exit $?
 fi
 
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jun-07] #
+#----------------------------------------#
 if [ "$1" = "-uninstall" ]
 then
 	clear
 	banner
-	if ! PromptYN "Proceed with uninstalling knock? (y/n):"
+	if ! PromptYN "Proceed with uninstalling knock.sh? (y/n):"
 	then
-		printf "\n\nUninstallation was canceled. Exiting...\n"
-		exit
+		printf "\nUninstallation was canceled. Exiting...\n"
+		exit 1
 	fi
-	echo
+	printf "\nUninstalling knock.sh...\n"
 
-	screen -S knock -X quit >/dev/null
-	sed -i -e '/knock.sh/d' $pm	  #remove post-mount command#
-	sed -i -e '/knock.sh/d' $fs	  #remove firewall-start command#
-	sed -i -e '/knock.sh/d' $pa	  #remove profile.add command#
+	#Stop any background screen process#
+	if [ -x /opt/sbin/screen ] && \
+	   /opt/sbin/screen -ls knock >/dev/null
+	then /opt/sbin/screen -S knock -X quit >/dev/null
+	fi
 
-	#Remove iptable modifications#
-	service restart_firewall >/dev/null
+	#Stop any background daemon process#
+	touch "$knockLoopDaemonSEM"
+	sleep 3  #Allow time to terminate process#
 
-	cp $cf $tf           #Save config in temp folder#
-	rm $cf               #Remove config file#
-	rm $vf 2>/dev/null   #Remove version file#
-	rm $df 2>/dev/null   #Remove develop flag#
-	rm $sf               #Remove script file#
+	sed -i -e '/knock.sh/d' "$profileAdd"
+	sed -i -e '/knock.sh/d' "$usbPostMount"
+	sed -i -e '/knock.sh/d' "$servicesStart"
+	sed -i -e '/knock.sh/d' "$firewallStart"
+
+	rm -f "$versionFile"
+	rm -f "$developFlag"
+	[ -s "$configFPath" ] && \
+	cp -fp "$configFPath" "$savedConfig"
+	rm -f "$configFPath"
+	rm -f "$optConfFile"
+	rm -f "$shScriptFile"
 
 	#Attempt to remove installation directory#
-	if [ "$(pwd)" = "$id" ]
+	if [ "$(pwd)" = "$INSTALL_DIR" ]
 	then
-		echo "Error: cannot remove install directory $id"
+		echo "**ERROR**: cannot remove install directory $INSTALL_DIR"
 	else
-		rmdir "$id" 2>/dev/null
+		rmdir "$INSTALL_DIR" 2>/dev/null
 	fi
 
+	#Clean up and reset Firewall#
+	service restart_firewall >/dev/null
+
 	echo
-	echo "Knock.sh uninstalled"
-	echo "Existing configuration file saved as $tf"
+	echo "Knock.sh is uninstalled"
+	[ -s "$savedConfig" ] && \
+	echo "Existing configuration file saved as $savedConfig"
 	echo "Thanks for using knock.sh!"
-	exit
+	exit 0
 fi
 
 if [ "$1" = "-develop" ]
 then
-	touch "$df"
-	exit
+	touch "$developFlag"
+	exit 0
 fi
 
 if [ "$1" = "-main" ]
 then
-	rm "$df" 2>/dev/null
-	exit
+	rm -f "$developFlag" 2>/dev/null
+	exit 0
 fi
 
 #----------------------------------------#
@@ -2211,20 +2704,20 @@ then
 		exit 0
 	fi
 
-	if [ -f "$df" ]
+	if [ -f "$developFlag" ]
 	then
-		giturl="$giturld"
+		gitURL_REPO="$gitURL_DEVL"
 	fi
 	echo -n "Running amtmupdate..."
-	rm "$vf" 2>/dev/null
+	rm -f "$versionFile" 2>/dev/null
 
-	_DownloadFileFromRepo_ "${giturl}/version.txt" "$vf"
-	if [ -s "$vf" ]
+	_DownloadFileFromRepo_ "${gitURL_REPO}/version.txt" "$versionFile"
+	if [ -s "$versionFile" ]
 	then
-		_DownloadFileFromRepo_ "${giturl}/knock.sh" "$sf"
-		chmod 755 "$sf"
-		$sf -install -force >/dev/null
-		$sf -start -nobanner >/dev/null
+		_DownloadFileFromRepo_ "${gitURL_REPO}/knock.sh" "$shScriptFile"
+		chmod 755 "$shScriptFile"
+		$shScriptFile -install -force >/dev/null
+		$shScriptFile -start -nobanner >/dev/null
 		echo -e "$cm"
 		echo "amtmupdate completed."
 		exit 0
@@ -2252,15 +2745,15 @@ fi
 if [ "$1" != "-loop" ]
 then
 	echo "Knock.sh: Router Commands for non-admin users"
-	echo "Version" $REV
-	echo ""
+	echo "Version $REV"
+	echo
 	echo "To install:"
-	echo -e "\t1) Move script to" $js"/ directory"
-	echo "	2) Run 'sh" $sf "-install'"
+	echo -e "\t1) Move script to ${SCRIPTS_DIR}/ directory"
+	echo "	2) Run 'sh" $shScriptFile "-install'"
 	echo "	3) Follow install prompts to edit config and start knock background process -or-"
-	echo "	3B) Manually update knock.cfg configuration file in the" $id"/ folder"
-        echo "		Format of file is:"
-        echo "		Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]"
+	echo "	3B) Manually update $pKnockConfig configuration file in the ${INSTALL_DIR}/ folder"
+	echo "		Format of file is:"
+	echo "		Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]"
 	echo -e "\t\tDefault configuration file has use-case examples:"
 	echo -e "\t\t\tWake PC, reboot router, and run custom enable/disable scripts (e.g. for VPN Director rules)"
 	echo "	4B) Run 'knock -start'"
@@ -2268,7 +2761,7 @@ then
 	echo "To update configuration:"
 	echo "	Run 'knock -stop'"
 	echo "	Run 'knock -edit' -or-"
-	echo "	Manually update" $cf
+	echo "	Manually update $configFPath"
 	echo "	Run 'knock -start'"
 	echo ""
 	echo "To display current Knock status:"
@@ -2285,7 +2778,7 @@ then
 	echo ""
 	echo "To display main menu:"
 	echo "	Run 'knock'"
-	exit
+	exit 0
 fi
 
 #----------------------------------------#
@@ -2333,24 +2826,57 @@ Read_dmesgID()
 	echo "$dmesgID"
 }
 
-#-----------------------------------------------#
-# Make sure ONLY ONE background loop is running
-#-----------------------------------------------#
-if ! _AcquireMutexFLock_
-then exit 1
-fi
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-07] #
+#-------------------------------------#
+_WaitAndCheckForSemaphore_()
+{
+    if [ $# -eq 0 ] || [ -z "$1" ] || \
+       ! echo "$1" | grep -qE "^[1-9][0-9]?$"
+    then return 1
+    fi
+    local retCode=1  sleepSECS
+    local sleepSecsNUM=0  sleepSecsMAX="$1"
+
+    while [ "$sleepSecsNUM" -lt "$sleepSecsMAX" ]
+    do
+        if [ "$sleepSecsNUM" -eq 0 ]
+        then sleepSECS=1
+        else sleepSECS=2
+        fi
+        sleep "$sleepSECS"
+        if [ -f "$knockLoopDaemonSEM" ]
+        then retCode=0 ; break
+        fi
+        sleepSecsNUM="$((sleepSecsNUM + sleepSECS))"
+    done
+    return "$retCode"
+}
 
 fullPortLIST="" ; dupPortLIST=""
 if ! _CheckConfigurationFile_
 then exit 1
 fi
 
+#-----------------------------------------------#
+# Make sure ONLY ONE background loop is running.
+#-----------------------------------------------#
+if ! _AcquireMutexFLock_
+then exit 1
+fi
+
+if ! "$useEntwareScreen"
+then trap '' HUP
+fi
+
+renice 15 $$
+rm -f "$knockLoopDaemonSEM"
+
 isDEBUG=false
 portNumOK=false
 thePortNum=""
 srceIPaddr=""
-sleepDelayMIN=3
-delayINTERVAL=2
+sleepINTERVAL=3
 portListCount=0
 
 knockWaitNUM=0
@@ -2369,13 +2895,15 @@ echo "Version $REV"
 _LogMsg_ "Waiting for port knocks..." "$pLogWARNG"
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-May-31] #
+# Modified by Martinski W. [2026-Jun-07] #
 #----------------------------------------#
 while true
 do
     #For Quicker Response#
-    sleep "$sleepDelayMIN"
-    knockWaitNUM="$((knockWaitNUM + sleepDelayMIN))"
+    if _WaitAndCheckForSemaphore_ "$sleepINTERVAL"
+    then break
+    fi
+    knockWaitNUM="$((knockWaitNUM + sleepINTERVAL))"
 
     Read_dmesgDATA
     nextID="$(Read_dmesgID)"
@@ -2385,7 +2913,7 @@ do
     # to prevent executing the same command within just secs 
     # in case a user accidentally triggers the same event.
     # But allow/accept a different Port Knock after ~8 secs.
-    # This allows for faster handling of Double-Port Knocks.
+    # This allows for faster handling of Multi-Port Knocks.
     #---------------------------------------------------------#
     if { [ -z "$nextID" ] || [ "$prevID" = "$nextID" ] ; } || \
        { [ "$prevKnockSIG" = "$nextKnockSIG" ] && \
@@ -2400,6 +2928,7 @@ do
     kPROTO="$(echo "$msgDATA" | awk -F' ' '{print $5}' | awk -F '=' '{print $2}')"
     _LogMsg_ "Knock detected on interface [$kIFACE] into port [${kPORTx}:${kPROTO}] with ID=[$nextID] from SRC=[$kSRCIP]"
 
+    exitConfigLoop=false
     while read -r cfgLINE
     do
         if [ -z "$cfgLINE" ] || \
@@ -2444,7 +2973,7 @@ do
         done
         portNumSeqLst="$tempNumSeqLst"
 
-        if [ "$portListCount" -gt 2 ]
+        if [ "$portListCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
         then
             portNumOK=false
             _LogMsg_ "**ERROR**: INVALID number of ports [$thePORTx] found" "$pLogERROR" NOLOG
@@ -2463,32 +2992,69 @@ do
         then continue  #NO MATCH#
         fi
 
-        portNum1="$(echo "$portNumSeqLst" | awk -F' ' '{print $1}')"
-        portNum2="$(echo "$portNumSeqLst" | awk -F' ' '{print $2}')"
-
         if [ "$portListCount" -eq 1 ]
         then
-            thePortNum="$portNum1"
+            thePortNum="$portNumSeqLst"
         else
             thePortNum=""
-            if [ "${kPORTx}_${kPROTO}" = "$portNum1" ]
-            then
-                _LogMsg_ "Starting port [${portNum1//_/:}] timer"
-                /opt/sbin/screen -S "knock_$portNum1" -X quit >/dev/null
-                /opt/sbin/screen -dmS "knock_$portNum1" sleep $DOUBLE_KNOCK_WAIT
-                srceIPaddr="$kSRCIP"
-                break  #Get Next Port in the sequence#
-            fi
+            exitConfigLoop=false
+            thisNum=0 ; prevNum=0 ; nextNum=0
+            thisPortNum="N/A" ; prevPortNum="" ; nextPortNum=""
 
-            if [ "$kSRCIP" = "$srceIPaddr" ] && \
-               [ "${kPORTx}_${kPROTO}" = "$portNum2" ] && \
-               /opt/sbin/screen -ls "knock_$portNum1" >/dev/null
-            then
-                _LogMsg_ "Port [${portNum1//_/:}] timer running"
-                /opt/sbin/screen -S "knock_$portNum1" -X quit >/dev/null
-                #Got Correct Port Sequence#
-                thePortNum="$portNum2"
-            fi
+            while [ "$((++thisNum))" -le "$portListCount" ]
+            do
+                if [ "$thisNum" -eq 1 ]
+                then
+                    prevNum=0
+                    prevPortNum=""
+                    srceIPaddr="$kSRCIP"
+                else
+                    prevNum="$((thisNum - 1))"
+                    prevPortNum="$(echo "$portNumSeqLst" | awk -v fn="$prevNum" -F' ' '{print $fn}')"
+                fi
+                if [ "$thisNum" -ge "$portListCount" ]
+                then
+                    nextNum=0
+                    nextPortNum=""
+                else
+                    nextNum="$((thisNum + 1))"
+                    nextPortNum="$(echo "$portNumSeqLst" | awk -v fn="$nextNum" -F' ' '{print $fn}')"
+                fi
+                thisPortNum="$(echo "$portNumSeqLst" | awk -v fn="$thisNum" -F' ' '{print $fn}')"
+
+                if [ "$kSRCIP" != "$srceIPaddr" ] || \
+                   [ "${kPORTx}_${kPROTO}" != "$thisPortNum" ]
+                then continue  #NO Match#
+                fi
+
+                if [ -n "$nextPortNum" ] && \
+                   { [ -z "$prevPortNum" ] || \
+                     _CheckKnockWaitTimer_ "$prevPortNum" ; }
+                then
+                    if [ -n "$prevPortNum" ] && \
+                       _CheckKnockWaitTimer_ "$prevPortNum"
+                    then
+                        _LogMsg_ "Port [${prevPortNum//_/:}] timer running"
+                        _StopKnockWaitTimer_ "$prevPortNum"
+                    fi
+                    _LogMsg_ "Starting port [${thisPortNum//_/:}] timer"
+                    _StartKnockWaitTimer_ "$thisPortNum" "$MULTI_PORT_KNOCK_WAIT"
+                    exitConfigLoop=true
+                    break  #Get Next Port in the sequence#
+                fi
+
+                if [ -z "$nextPortNum" ] && \
+                   [ -n "$prevPortNum" ] && \
+                   _CheckKnockWaitTimer_ "$prevPortNum"
+                then
+                    _LogMsg_ "Port [${prevPortNum//_/:}] timer running"
+                    _StopKnockWaitTimer_ "$prevPortNum"
+                    thePortNum="$thisPortNum"
+                    break  #Got Complete Port Sequence#
+                fi
+            done
+
+            "$exitConfigLoop" && break
         fi
 
         if [ -n "$thePortNum" ] && [ "${kPORTx}_${kPROTO}" = "$thePortNum" ]
@@ -2498,16 +3064,21 @@ do
             eval $theCMDx "$thePORTx" &
             break  #Get Next Port Knock#
         fi
-    done < "$cf"
+    done < "$configFPath"
 
-    sleep "$delayINTERVAL"
-    knockWaitNUM="$((knockWaitNUM + delayINTERVAL))"
+    if _WaitAndCheckForSemaphore_ "$sleepINTERVAL"
+    then break
+    fi
+    knockWaitNUM="$((knockWaitNUM + sleepINTERVAL))"
 
     # Get retry entry #
     Read_dmesgDATA
     prevID="$(Read_dmesgID checkID)"
 done
 
+renice 0 $$
 _ReleaseMutexFLock_
+
+exit 0
 
 #EOF#
