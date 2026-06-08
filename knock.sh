@@ -1802,14 +1802,17 @@ _StopBackground_ScreenProcess_()
 #-------------------------------------#
 # Added by Martinski W. [2026-Jun-06] #
 #-------------------------------------#
-_CheckForRogueBackground_ScreenProcess_()
+_CheckAndStopBackground_ScreenProcess_()
 {
 	if [ -x /opt/sbin/screen ] && \
 	   /opt/sbin/screen -ls knock >/dev/null
 	then
+		{ [ $# -eq 0 ] || [ -z "$1" ] ; } && \
 		printf "An existing background process must be stopped first. Please wait...\n"
 		_StopBackground_ScreenProcess_
+		return $?
 	fi
+	return 0
 }
 
 #-------------------------------------#
@@ -1828,17 +1831,20 @@ _StopBackground_DaemonProcess_()
 #-------------------------------------#
 # Added by Martinski W. [2026-Jun-06] #
 #-------------------------------------#
-_CheckForRogueBackground_DaemonProcess_()
+_CheckAndStopBackground_DaemonProcess_()
 {
 	if top -bn1 | grep -qE '/[k]nock.sh -loop'
 	then
+		{ [ $# -eq 0 ] || [ -z "$1" ] ; } && \
 		printf "An existing background process must be stopped first. Please wait...\n"
 		_StopBackground_DaemonProcess_
+		return $?
 	fi
+	return 0
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-06] #
+# Modified by Martinski W. [2026-Jun-08] #
 #----------------------------------------#
 _StartBackgroundProcess_()
 {
@@ -1849,13 +1855,9 @@ _StartBackgroundProcess_()
 	service restart_firewall >/dev/null
 	sleep 1
 
-	#Make sure ONLY ONE background process is run#
-	if "$useEntwareScreen"
-	then
-		_CheckForRogueBackground_ScreenProcess_
-	else
-		_CheckForRogueBackground_DaemonProcess_
-	fi
+	#Make sure ONLY ONE background process will run#
+	_CheckAndStopBackground_ScreenProcess_
+	_CheckAndStopBackground_DaemonProcess_
 
 	printf "Waiting to set firewall rules. Please wait...\n"
 	_WaitForCustomFirewallRules_ 5
@@ -1891,7 +1893,7 @@ _StartBackgroundProcess_()
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-06] #
+# Modified by Martinski W. [2026-Jun-08] #
 #----------------------------------------#
 _StopBackgroundProcess_()
 {
@@ -1902,11 +1904,10 @@ _StopBackgroundProcess_()
 	local bgProcStopOK=false
 	printf "\nStopping knock.sh background process. Please wait...\n"
 
-	if "$useEntwareScreen"
-	then
-		_StopBackground_ScreenProcess_ && bgProcStopOK=true
-	else
-		_StopBackground_DaemonProcess_ && bgProcStopOK=true
+	#Make sure to stop ALL background processes#
+	if _CheckAndStopBackground_ScreenProcess_ silent && \
+	   _CheckAndStopBackground_DaemonProcess_ silent
+	then bgProcStopOK=true
 	fi
 
 	if "$bgProcStopOK"
