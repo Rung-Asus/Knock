@@ -2876,7 +2876,7 @@ if ! "$useEntwareScreen"
 then trap '' HUP
 fi
 
-renice 15 $$
+renice 5 $$
 rm -f "$knockLoopDaemonSEM"
 
 isDEBUG=false
