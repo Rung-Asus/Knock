@@ -41,7 +41,7 @@
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jun-08
+# Last Updated: 2026-Jun-10
 ########################################################################
 
 #Update Log:
@@ -81,10 +81,6 @@ readonly MULTI_PORT_KNOCK_WAIT=30
 # MAXIMUM number for a multi-port knock sequence #
 readonly MULTI_PORT_KNOCK_MAX=6
 
-#To handle ID field from iOS always being ZERO#
-readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
-readonly FAKE_KMESG="knock.sh IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID=$FAKE_NUMID PROTO="
-
 # Give priority to built-in binaries #
 export PATH="/bin:/usr/bin:/sbin:/usr/sbin:$PATH"
 
@@ -111,10 +107,11 @@ readonly ERRORct="$REDct"
 readonly WARNGct="$YELLWct"
 
 readonly TEMP_DIR="/tmp/var/tmp"
+readonly shScriptName="knock.sh"
 readonly pKnockConfig="knock.cfg"
 readonly scriptConfig="config.txt"
 readonly knockWaitTimerName="knockWaitTimer"
-readonly knockLoopDaemonSEM="${TEMP_DIR}/knockLoopDaemon.SEM"
+readonly knockLoopDaemonSEM="${TEMP_DIR}/knockLoopDaemon.FSEM"
 
 if [ -t 0 ] && ! tty | grep -qwi "NOT"
 then
@@ -143,13 +140,17 @@ readonly savedConfig="${TEMP_DIR}/$pKnockConfig"
 readonly iptFW1="${TEMP_DIR}/${scriptFNameTag}_iptables1.txt"
 readonly iptFW2="${TEMP_DIR}/${scriptFNameTag}_iptables2.txt"
 readonly versionFile="${INSTALL_DIR}/version.txt"
-readonly shScriptFile="${SCRIPTS_DIR}/knock.sh"
+readonly shScriptFile="${SCRIPTS_DIR}/$shScriptName"
 readonly profileAdd="/jffs/configs/profile.add"
 readonly usbPostMount="${SCRIPTS_DIR}/post-mount"
 readonly firewallStart="${SCRIPTS_DIR}/firewall-start"
 readonly servicesStart="${SCRIPTS_DIR}/services-start"
 readonly developFlag="${INSTALL_DIR}/develop"
 readonly cm="\xE2\x9C\x94"
+
+#To handle ID field from iOS always being ZERO#
+readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
+readonly FAKE_KMESG="$shScriptName IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID=$FAKE_NUMID PROTO="
 
 readonly REPO_URL="https://raw.githubusercontent.com/Rung-Asus/Knock"
 readonly gitURL_MAIN="${REPO_URL}/main"
@@ -174,11 +175,13 @@ trap 'CleanUp' HUP INT QUIT ABRT TERM
 
 banner()
 {
-	echo " _                      _           _     "
-	echo "| | __ _ __   ___   ___| | __   ___| |__  "
-	echo "| |/ /| '_ \ / _ \ / __| |/ /  / __| '_ \ "
-	echo "|   < | | | | (_) | (__|   <  _\__ \ | | |"
-	echo "|_|\_\|_| |_|\___/ \___|_|\_\(_)___/_| |_| v$REV"
+	clear
+	echo
+	printf " _                      _           _     \n"
+	printf "| | __ _ __   ___   ___| | __   ___| |__  \n"
+	printf "| |/ /| '_ \ / _ \ / __| |/ /  / __| '_ \ \n"
+	printf "|   < | | | | (_) | (__|   <  _\__ \ | | |\n"
+	printf "|_|\_\|_| |_|\___/ \___|_|\_\(_)___/_| |_| ${GREENct}v$REV${CLEARct}\n"
 	echo
 }
 
@@ -191,7 +194,6 @@ CleanUp()
 	if [ -n "${stty_save:+xSETOKx}" ]
 	then stty "$stty_save"
 	fi
-	clear
 	banner
     _ReleaseMutexFLock_ checkLockOK
 	printf "\nExiting...\n"
@@ -687,12 +689,12 @@ CheckInstall()
 	then
 		if [ ! -x /opt/sbin/screen ] || \
 		   [ ! -s "$usbPostMount" ]  || \
-		   ! grep -q "/knock.sh" "$usbPostMount"
+		   ! grep -q "/$shScriptName" "$usbPostMount"
 		then return 1
 		fi
 	else
 		if [ ! -s "$servicesStart" ] || \
-		   ! grep -q "/knock.sh" "$servicesStart"
+		   ! grep -q "/$shScriptName" "$servicesStart"
 		then return 1
 		fi
 	fi
@@ -701,8 +703,8 @@ CheckInstall()
 	   [ ! -s "$configFPath" ]   || \
 	   [ ! -s "$profileAdd" ]    || \
 	   [ ! -s "$firewallStart" ] || \
-	   ! grep -q "/knock.sh" "$profileAdd" || \
-	   ! grep -q "/knock.sh" "$firewallStart"
+	   ! grep -q "/$shScriptName" "$profileAdd" || \
+	   ! grep -q "/$shScriptName" "$firewallStart"
 	then return 1
 	fi
 
@@ -712,7 +714,7 @@ CheckInstall()
 #----------------------------------------#
 # Modified by Martinski W. [2026-Jun-06] #
 #----------------------------------------#
-#Verify knock rules are in firewall and knock.sh is running#
+#Verify knock rules are in firewall and background process is running#
 CheckStatus()
 {
 	if "$useEntwareScreen"
@@ -721,11 +723,11 @@ CheckStatus()
 		then return 1
 		fi
 	else
-		if ! top -bn1 | grep -qE '/[k]nock.sh -loop'
+		if ! top -bn1 | grep -qE "[/]$shScriptName -loop"
 		then return 1
 		fi
 	fi
-	iptables -S INPUT | grep -q '\bknock.sh' || return 1
+	iptables -S INPUT | grep -q "\b$shScriptName" || return 1
 }
 
 #-------------------------------------#
@@ -907,8 +909,8 @@ _CreateCustomFirewallRules_()
 
 			for IFace in $portIFacesLst
 			do
-				iptables -D INPUT -i "$IFace" -p "$proto" -m "$proto" --dport "$portN" -j LOG --log-prefix "knock.sh " --log-level info 2>/dev/null
-				iptables -I INPUT -i "$IFace" -p "$proto" -m "$proto" --dport "$portN" -j LOG --log-prefix "knock.sh " --log-level info
+				iptables -D INPUT -i "$IFace" -p "$proto" -m "$proto" --dport "$portN" -j LOG --log-prefix "$shScriptName " --log-level info 2>/dev/null
+				iptables -I INPUT -i "$IFace" -p "$proto" -m "$proto" --dport "$portN" -j LOG --log-prefix "$shScriptName " --log-level info
 			done
 		done
 	done < "$configFPath"
@@ -933,7 +935,7 @@ CheckFirewall()
 	fi
 
 	#Save current firewall port knock rules#
-	iptables -S INPUT | grep '\bknock.sh' > "$iptFW1"
+	iptables -S INPUT | grep "\b$shScriptName" > "$iptFW1"
 
 	printf '' > "$iptFW2"
 	printf '' > "$pkTempFWR"
@@ -999,7 +1001,7 @@ CheckFirewall()
 			for IFace in $portIFacesLst
 			do
 			{
-			    echo "-A INPUT -i $IFace -p $proto -m $proto --dport $portN -j LOG --log-prefix \"knock.sh \" --log-level 6"
+			    echo "-A INPUT -i $IFace -p $proto -m $proto --dport $portN -j LOG --log-prefix \"$shScriptName \" --log-level 6"
 			} >> "$pkTempFWR"
 			done
 		done
@@ -1077,9 +1079,7 @@ _DownloadFileFromRepo_()
 #----------------------------------------#
 UpdateScript()
 {
-	clear
 	banner
-
 	if [ -f "$developFlag" ]
 	then
 		echo "On develop branch."
@@ -1090,13 +1090,13 @@ UpdateScript()
 	_DownloadFileFromRepo_ "${gitURL_REPO}/version.txt" "$versionFile"
 	if [ -s "$versionFile" ]
 	then
-		nv="$(cat "$versionFile" | head -n1)"
-		echo "Latest version: $nv"
+		newVer="$(cat "$versionFile" | head -n1)"
+		echo "Latest version: $newVer"
 		echo "Current version: $REV"
 		if PromptYN "Proceed with update? (y/n):"
 		then
 			echo -e "\nDownloading..."
-			_DownloadFileFromRepo_ "${gitURL_REPO}/knock.sh" "$shScriptFile"
+			_DownloadFileFromRepo_ "${gitURL_REPO}/$shScriptName" "$shScriptFile"
 			chmod 755 "$shScriptFile"
 			echo "Installing..."
 			$shScriptFile -install -force
@@ -1531,7 +1531,7 @@ EditPortKnockConfig()
 		if PromptYN
 		then
 			echo -en "\nSaving configuration"
-			echo "#knock.sh configuration file" > "$configFPath"
+			echo "#$shScriptName configuration file" > "$configFPath"
 			echo -e "\n#Format Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]\n" >> "$configFPath"
 
 			#Write virtual array back to config file#
@@ -1557,9 +1557,8 @@ EditPortKnockConfig()
 
 	if [ $# -lt 2 ] || [ -z "$2" ]
 	then
-		clear
 		banner
-		echo "Thanks for using knock.sh!"
+		echo "Thanks for using ${shScriptName}!"
 	fi
 	return 0
 }
@@ -1568,7 +1567,7 @@ EditPortKnockConfig()
 ## Added by Martinski W. [2026-May-17] ##
 ##-------------------------------------##
 readonly knockMutexFLock_FD=564
-readonly knockMutexFLock_FN="${TEMP_DIR}/${scriptFNameTag}_Loop.FLOCK"
+readonly knockMutexFLock_FN="${TEMP_DIR}/knockLoopDaemon.FLOCK"
 knockMutexFLock_OK=false  #DO NOT have FLock#
 
 _ReleaseMutexFLock_()
@@ -1737,7 +1736,7 @@ ShowConfig()
 #-------------------------------------#
 _MenuShowConfig_()
 {
-	clear ; banner
+	banner
 	ShowConfig quietCheck
 	return 0
 }
@@ -1747,43 +1746,50 @@ _MenuShowConfig_()
 #-------------------------------------#
 _WaitForCustomFirewallRules_()
 {
-    local sleepSecsNUM=0  sleepSecsMAX
+	local sleepSecsNUM=0  sleepSecsMAX
 
-    if [ $# -eq 0 ] || [ -z "$1" ] || \
-       ! echo "$1" | grep -qE "^[1-9][0-9]?$"
-    then sleepSecsMAX=10
-    else sleepSecsMAX="$1"
-    fi
+	if [ $# -eq 0 ] || [ -z "$1" ] || \
+	   ! echo "$1" | grep -qE "^[1-9][0-9]?$"
+	then sleepSecsMAX=10
+	else sleepSecsMAX="$1"
+	fi
 
-    while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
-    do
-        sleep 1
-        if iptables -S INPUT | grep -q '\bknock.sh'
-        then break
-        fi
-    done
+	while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
+	do
+		sleep 1
+		if iptables -S INPUT | grep -q "\b$shScriptName"
+		then break
+		fi
+	done
 }
 
 #-------------------------------------#
 # Added by Martinski W. [2026-Jun-02] #
 #-------------------------------------#
-_WaitForBackground_ScreenProcess_()
+_StartBackground_ScreenProcess_()
 {
-    local sleepSecsNUM=0  sleepSecsMAX
+	if [ ! -x /opt/sbin/screen ]
+	then return 1
+	fi
+	local sleepSecsNUM=0  sleepSecsMAX
 
-    if [ $# -eq 0 ] || [ -z "$1" ] || \
-       ! echo "$1" | grep -qE "^[1-9][0-9]?$"
-    then sleepSecsMAX=10
-    else sleepSecsMAX="$1"
-    fi
+	if [ $# -eq 0 ] || [ -z "$1" ] || \
+	   ! echo "$1" | grep -qE "^[1-9][0-9]?$"
+	then sleepSecsMAX=10
+	else sleepSecsMAX="$1"
+	fi
 
-    while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
-    do
-        sleep 1
-        if /opt/sbin/screen -ls knock >/dev/null
-        then break
-        fi
-    done
+	/opt/sbin/screen -dmS knock "$shScriptFile" -loop
+	sleep 2   #Allow time to initialize#
+
+	while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
+	do
+		sleep 1
+		if /opt/sbin/screen -ls knock >/dev/null
+		then break
+		fi
+	done
+	return 0
 }
 
 #-------------------------------------#
@@ -1791,8 +1797,26 @@ _WaitForBackground_ScreenProcess_()
 #-------------------------------------#
 _StopBackground_ScreenProcess_()
 {
+	local sleepSecsNUM=0  sleepSecsMAX
+
+	if [ $# -eq 0 ] || [ -z "$1" ] || \
+	   ! echo "$1" | grep -qE "^[1-9][0-9]?$"
+	then sleepSecsMAX=10
+	else sleepSecsMAX="$1"
+	fi
+
 	/opt/sbin/screen -S knock -X quit >/dev/null
-	sleep 4  #Allow time to terminate process#
+	sleep 1   #Allow time to terminate#
+
+	while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
+	do
+		sleep 1
+		if /opt/sbin/screen -ls knock >/dev/null
+		then continue
+		fi
+		break
+	done
+
 	if /opt/sbin/screen -ls knock >/dev/null
 	then return 1
 	else return 0
@@ -1809,9 +1833,35 @@ _CheckAndStopBackground_ScreenProcess_()
 	then
 		{ [ $# -eq 0 ] || [ -z "$1" ] ; } && \
 		printf "An existing background process must be stopped first. Please wait...\n"
-		_StopBackground_ScreenProcess_
+		_StopBackground_ScreenProcess_ 5
 		return $?
 	fi
+	return 0
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-09] #
+#-------------------------------------#
+_StartBackground_DaemonProcess_()
+{
+	local sleepSecsNUM=0  sleepSecsMAX
+
+	if [ $# -eq 0 ] || [ -z "$1" ] || \
+	   ! echo "$1" | grep -qE "^[1-9][0-9]?$"
+	then sleepSecsMAX=10
+	else sleepSecsMAX="$1"
+	fi
+
+	nohup "$shScriptFile" -loop >/dev/null &
+	sleep 2   #Allow time to initialize#
+
+	while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
+	do
+		sleep 1
+		if top -bn1 | grep -qE "[/]$shScriptName -loop"
+		then break
+		fi
+	done
 	return 0
 }
 
@@ -1820,9 +1870,27 @@ _CheckAndStopBackground_ScreenProcess_()
 #-------------------------------------#
 _StopBackground_DaemonProcess_()
 {
+	local sleepSecsNUM=0  sleepSecsMAX
+
+	if [ $# -eq 0 ] || [ -z "$1" ] || \
+	   ! echo "$1" | grep -qE "^[1-9][0-9]?$"
+	then sleepSecsMAX=10
+	else sleepSecsMAX="$1"
+	fi
+
 	touch "$knockLoopDaemonSEM"
-	sleep 4  #Allow time to terminate process#
-	if top -bn1 | grep -qE '/[k]nock.sh -loop'
+	sleep 1   #Allow time to terminate#
+
+	while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
+	do
+		sleep 1
+		if top -bn1 | grep -qE "[/]$shScriptName -loop"
+		then continue
+		fi
+		break
+	done
+
+	if top -bn1 | grep -qE "[/]$shScriptName -loop"
 	then return 1
 	else return 0
 	fi
@@ -1833,11 +1901,11 @@ _StopBackground_DaemonProcess_()
 #-------------------------------------#
 _CheckAndStopBackground_DaemonProcess_()
 {
-	if top -bn1 | grep -qE '/[k]nock.sh -loop'
+	if top -bn1 | grep -qE "[/]$shScriptName -loop"
 	then
 		{ [ $# -eq 0 ] || [ -z "$1" ] ; } && \
 		printf "An existing background process must be stopped first. Please wait...\n"
-		_StopBackground_DaemonProcess_
+		_StopBackground_DaemonProcess_ 5
 		return $?
 	fi
 	return 0
@@ -1848,6 +1916,7 @@ _CheckAndStopBackground_DaemonProcess_()
 #----------------------------------------#
 _StartBackgroundProcess_()
 {
+	printf "\nPlease wait...\n"
 	if ! _CheckConfigurationFile_
 	then return 1
 	fi
@@ -1859,26 +1928,23 @@ _StartBackgroundProcess_()
 	_CheckAndStopBackground_ScreenProcess_
 	_CheckAndStopBackground_DaemonProcess_
 
-	printf "Waiting to set firewall rules. Please wait...\n"
+	printf "Waiting to set firewall rules...\n"
 	_WaitForCustomFirewallRules_ 5
 
-	_LogMsg_ "Starting knock.sh background process" "$pLogWARNG"
+	_LogMsg_ "Starting $shScriptName background process" "$pLogWARNG"
 	printf "Please wait...\n"
 
 	if "$useEntwareScreen"
 	then
-		$shScriptFile "-screen"
+		_StartBackground_ScreenProcess_ 5
 	else
-		nohup "$shScriptFile" -loop >/dev/null &
-		printf "Waiting for background process. Please wait...\n"
-		sleep 3
+		_StartBackground_DaemonProcess_ 5
 	fi
 
 	if CheckStatus
 	then
 		if [ $# -eq 0 ] || [ -z "$1" ]
 		then
-			clear
 			banner
 			printf "\nKnock.sh has started and is ready for port knocks\n\n"
 			ShowConfig quietCheck
@@ -1886,7 +1952,7 @@ _StartBackgroundProcess_()
 			printf "Knock.sh has started and is ready for port knocks\n"
 		fi
 	else
-		printf "\nERROR: Cannot start knock process in background\n\n"
+		printf "\nERROR: Cannot start $shScriptName background process\n\n"
 		return 1
 	fi
 	return 0
@@ -1899,10 +1965,10 @@ _StopBackgroundProcess_()
 {
 	if [ $# -eq 0 ] || [ -z "$1" ]
 	then
-		clear ; banner
+		banner
 	fi
 	local bgProcStopOK=false
-	printf "\nStopping knock.sh background process. Please wait...\n"
+	printf "\nStopping $shScriptName background process. Please wait...\n"
 
 	#Make sure to stop ALL background processes#
 	if _CheckAndStopBackground_ScreenProcess_ silent && \
@@ -1912,10 +1978,10 @@ _StopBackgroundProcess_()
 
 	if "$bgProcStopOK"
 	then
-		printf "Knock.sh background process was stopped\n"
+		printf "The $shScriptName background process was stopped\n"
 		return 0
 	else
-		printf "Knock.sh background process was NOT stopped\n"
+		printf "The $shScriptName background process was NOT stopped\n"
 		return 1
 	fi
 }
@@ -2010,20 +2076,19 @@ then
 
 	while true
 	do
-		clear
 		banner
 		ShowStatus
 
 		printf " Main Menu\n"
 		printf " =========\n\n"
-		printf " ${GREENct}1${CLEARct}. Install/reinstall knock.sh\n"
-		printf " ${GREENct}2${CLEARct}. Uninstall knock.sh\n"
+		printf " ${GREENct}1${CLEARct}. Install/reinstall ${shScriptName}\n"
+		printf " ${GREENct}2${CLEARct}. Uninstall ${shScriptName}\n"
 		if CheckInstall
 		then
-			printf " ${GREENct}3${CLEARct}. Display knock.sh config file\n"
-			printf " ${GREENct}4${CLEARct}. Start/restart knock.sh background process\n"
-			printf " ${GREENct}5${CLEARct}. Stop knock.sh background process\n"
-			printf " ${GREENct}6${CLEARct}. Edit knock.sh config file\n"
+			printf " ${GREENct}3${CLEARct}. Display $shScriptName config file\n"
+			printf " ${GREENct}4${CLEARct}. Start/restart $shScriptName background process\n"
+			printf " ${GREENct}5${CLEARct}. Stop $shScriptName background process\n"
+			printf " ${GREENct}6${CLEARct}. Edit $shScriptName config file\n"
 			printf " ${GREENct}7${CLEARct}. Update script to latest version\n"
 		fi
 		printf "\n ${GREENct}e${CLEARct}. Exit\n\n"
@@ -2056,7 +2121,7 @@ then
 				then
 					echo
 					$shScriptFile -edit -nobanner
-					if PromptYN "Are you ready to start processing knocks (start knock.sh)? (y/n):"
+					if PromptYN "Are you ready to start processing knocks (start $shScriptName)? (y/n):"
 					then
 						echo
 						$shScriptFile -start -nobanner
@@ -2103,7 +2168,7 @@ then
 				EditPortKnockConfig -edit -nobanner
 				if "$cfgUpdated"
 				then
-					if PromptYN "Are you ready to start processing knocks (start knock.sh)? (y/n):"
+					if PromptYN "Are you ready to start processing knocks (start $shScriptName)? (y/n):"
 					then
 						echo
 						_StartBackgroundProcess_ -menu
@@ -2117,7 +2182,7 @@ then
 			7)
 				if UpdateScript
 				then
-					_PressAnyKey_ "Press ANY key to restart knock.sh..."
+					_PressAnyKey_ "Press ANY key to restart ${shScriptName}..."
 					clear
 					exec "$shScriptFile"
 					exit
@@ -2130,9 +2195,8 @@ then
 		esac
 	done
 
-	clear
 	banner
-	printf "\nThanks for using knock.sh!\n\n"
+	printf "\nThanks for using ${shScriptName}!\n\n"
 	exit
 fi
 
@@ -2272,7 +2336,6 @@ fi
 
 if [ "$1" = "-status" ]
 then
-	clear
 	banner
 	ShowStatus
 	exit
@@ -2285,13 +2348,13 @@ then
 fi
 
 #-------------------------------------#
-# Added by Martinski W. [2026-Jun-06] #
+# Added by Martinski W. [2026-Jun-09] #
 #-------------------------------------#
 if [ "$1" = "-daemon" ]
 then
 	if [ ! -s "$shScriptFile" ]
 	then
-		_LogMsg_ "**ERROR**: knock.sh is not installed yet" "$pLogERROR"
+		_LogMsg_ "**ERROR**: $shScriptName is NOT installed yet" "$pLogERROR"
 		exit 1
 	fi
 	if [ ! -s "$configFPath" ]
@@ -2300,66 +2363,45 @@ then
 		exit 1
 	fi
 
-	_LogMsg_ "Starting knock.sh background process" "$pLogWARNG" NOECHO
+	_LogMsg_ "Starting $shScriptName background process" "$pLogWARNG" NOECHO
 
 	#Stop any current rogue background process#
-	roguePID="$(top -bn1 | grep -E '/[k]nock.sh -loop')"
-	if [ -n "$roguePID" ]
-	then
-		touch "$knockLoopDaemonSEM"
-		roguePID="$(echo "$roguePID" | awk -F' ' '{print $1}')"
-		_LogMsg_ "Stopping knock.sh process [$roguePID] during restart" "$pLogWARNG"
-		sleep 4  #Allow time to terminate process#
-	fi
+	_CheckAndStopBackground_ScreenProcess_
+	_CheckAndStopBackground_DaemonProcess_
 
-	nohup "$shScriptFile" -loop >/dev/null &
 	printf "Waiting for background process. Please wait...\n"
-	sleep 3
+	_StartBackground_DaemonProcess_ 5
 
 	_WaitForCustomFirewallRules_ 5
 	CheckStatus && exit 0 || exit 1
 fi
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-06] #
+# Modified by Martinski W. [2026-Jun-09] #
 #----------------------------------------#
 if [ "$1" = "-screen" ]
 then
 	if [ ! -x /opt/sbin/screen ]
 	then
-		_LogMsg_ "**ERROR**: Entware Screen app not installed" "$pLogERROR"
+		_LogMsg_ "**ERROR**: Entware Screen is NOT installed" "$pLogERROR"
 		exit 1
 	fi
 	if [ ! -s "$shScriptFile" ]
 	then
-		_LogMsg_ "**ERROR**: knock.sh is not installed yet" "$pLogERROR"
+		_LogMsg_ "**ERROR**: $shScriptName is NOT installed yet" "$pLogERROR"
 		exit 1
 	fi
 
-	_LogMsg_ "Starting knock.sh background process" "$pLogWARNG" NOECHO
+	_LogMsg_ "Starting $shScriptName background process" "$pLogWARNG" NOECHO
 
 	#Stop any current rogue background process#
-	if /opt/sbin/screen -ls knock >/dev/null
-	then
-		/opt/sbin/screen -S knock -X quit >/dev/null
-		sleep 3  #Allow time to terminate process#
-	fi
+	_CheckAndStopBackground_ScreenProcess_
+	_CheckAndStopBackground_DaemonProcess_
 
-	#Kill rogue background process#
-	roguePID="$(top -bn1 | grep -E '/[k]nock.sh -loop')"
-	if [ -n "$roguePID" ]
-	then
-		roguePID="$(echo "$roguePID" | awk -F' ' '{print $1}')"
-		kill -TERM "$roguePID" >/dev/null 2>&1
-		_LogMsg_ "Force killed knock.sh process [$roguePID] during restart" "$pLogWARNG"
-		sleep 3  #Allow time to terminate process#
-	fi
-
-	/opt/sbin/screen -dmS knock "$shScriptFile" -loop
 	printf "Waiting for background process. Please wait...\n"
+	_StartBackground_ScreenProcess_ 5
 
 	_WaitForCustomFirewallRules_ 5
-	_WaitForBackground_ScreenProcess_ 5
 	CheckStatus && exit 0 || exit 1
 fi
 
@@ -2413,7 +2455,11 @@ _CheckForEntwareScreen_()
 _SetUpUSB_PostMount_()
 {
 	# Clean up services-start #
-	sed -i -e '/knock.sh/d' "$servicesStart"
+	if [ -s "$servicesStart" ] && \
+	   grep -q "/$shScriptName" "$servicesStart"
+	then
+		sed -i -e "\\~/${shScriptName}~d" "$servicesStart"
+	fi
 
 	echo -ne "\tUpdating post-mount file..."
 	if [ ! -s "$usbPostMount" ]
@@ -2421,8 +2467,8 @@ _SetUpUSB_PostMount_()
 		echo "#!/bin/sh" > "$usbPostMount"
 		echo >> "$usbPostMount"
 	fi
-	sed -i -e '/knock.sh/d' "$usbPostMount"
-	echo "(sleep 30 && $shScriptFile -screen) & # Added by knock.sh" >> "$usbPostMount"
+	sed -i -e "\\~/${shScriptName}~d" "$usbPostMount"
+	echo "(sleep 30 && $shScriptFile -screen) & # Added by $shScriptName" >> "$usbPostMount"
 	chmod 755 "$usbPostMount"
 	echo -e "$cm"
 }
@@ -2433,7 +2479,11 @@ _SetUpUSB_PostMount_()
 _SetUpServicesStart_()
 {
 	# Clean up post-mount #
-	sed -i -e '/knock.sh/d' "$usbPostMount"
+	if [ -s "$usbPostMount" ] && \
+	   grep -q "/$shScriptName" "$usbPostMount"
+	then
+		sed -i -e "\\~/${shScriptName}~d" "$usbPostMount"
+	fi
 
 	echo -ne "\tUpdating services-start file..."
 	if [ ! -s "$servicesStart" ]
@@ -2441,8 +2491,8 @@ _SetUpServicesStart_()
 		echo "#!/bin/sh" > "$servicesStart"
 		echo >> "$servicesStart"
 	fi
-	sed -i -e '/knock.sh/d' "$servicesStart"
-	echo "(sleep 30 && $shScriptFile -daemon) & # Added by knock.sh" >> "$servicesStart"
+	sed -i -e "\\~/${shScriptName}~d" "$servicesStart"
+	echo "(sleep 30 && $shScriptFile -daemon) & # Added by $shScriptName" >> "$servicesStart"
 	chmod 755 "$servicesStart"
 	echo -e "$cm"
 }
@@ -2454,14 +2504,13 @@ if [ "$1" = "-install" ]
 then
 	if [ $# -lt 2 ] || [ -z "$2" ]
 	then
-		clear
 		banner
-		if ! PromptYN "Proceed with installing knock? (y/n):"
+		if ! PromptYN "Proceed with installing ${shScriptName}? (y/n):"
 		then
-			printf "\nThanks for trying knock.sh!\n"
+			printf "\nThanks for trying ${shScriptName}!\n"
 			exit 0
 		fi
-		printf "\nInstalling knock.sh...\n"
+		printf "\nInstalling ${shScriptName}...\n"
 	fi
 
 	# Check run location #
@@ -2515,7 +2564,7 @@ then
 		echo -ne "\tCreating configuration file..."
 
 		cat <<EOF > "$configFPath"
-#knock.sh Example configuration file
+#$shScriptName Example configuration file
 
 #Format Port Number <space> Interface(s) [comma separated] <space> Command to execute [to end of line]
 
@@ -2532,7 +2581,7 @@ then
 44447 br0 /jffs/scripts/disable-wireguard-rule.sh
 
 #Sensitive command. Only execute command after a knock from two different ports (15 seconds apart)
-44449,44410 br0 /jffs/scripts/doubleknock.sh
+44449,44410 br0 /jffs/scripts/doubleKnock.sh
 
 EOF
 
@@ -2571,8 +2620,8 @@ EOF
 		echo "#!/bin/sh" > "$firewallStart"
 		echo >> "$firewallStart"
 	fi
-	sed -i -e '/knock.sh/d' "$firewallStart"
-	echo "$shScriptFile -firewall # Added by knock.sh" >> "$firewallStart"
+	sed -i -e "\\~/${shScriptName}~d" "$firewallStart"
+	echo "$shScriptFile -firewall # Added by $shScriptName" >> "$firewallStart"
 	chmod 755 "$firewallStart"
 	echo -e "$cm"
 
@@ -2582,8 +2631,8 @@ EOF
 	then
 		touch "$profileAdd"
 	fi
-	sed -i -e '/knock.sh/d' "$profileAdd"
-	echo "alias knock=\"sh $shScriptFile\" # Added by knock.sh" >> "$profileAdd"
+	sed -i -e "\\~/${shScriptName}~d" "$profileAdd"
+	echo "alias knock=\"sh $shScriptFile\" # Added by $shScriptName" >> "$profileAdd"
 	chmod 644 "$profileAdd"
 	echo -e "$cm"
 
@@ -2595,7 +2644,7 @@ EOF
 		then
 			echo
 			$shScriptFile -edit -nobanner
-			if PromptYN "Are you ready to start processing knocks (start knock.sh)? (y/n):"
+			if PromptYN "Are you ready to start processing port knocks (start $shScriptName)? (y/n):"
 			then
 				echo
 				$shScriptFile -start
@@ -2605,7 +2654,7 @@ EOF
 		else
 			echo -e "\nPlease update the configuration file from the default ('knock -edit')"
 			echo
-			echo "Once updated, please run 'knock -start' to begin processing knocks"
+			echo "Once updated, please run 'knock -start' to begin processing port knocks"
 		fi
 	fi
 	exit 0
@@ -2634,33 +2683,41 @@ then
 fi
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-07] #
+# Modified by Martinski W. [2026-Jun-08] #
 #----------------------------------------#
 if [ "$1" = "-uninstall" ]
 then
-	clear
 	banner
-	if ! PromptYN "Proceed with uninstalling knock.sh? (y/n):"
+	if ! PromptYN "Proceed with uninstalling $shScriptName? (y/n):"
 	then
 		printf "\nUninstallation was canceled. Exiting...\n"
 		exit 1
 	fi
-	printf "\nUninstalling knock.sh...\n"
+	printf "\nUninstalling ${shScriptName}...\n"
 
-	#Stop any background screen process#
-	if [ -x /opt/sbin/screen ] && \
-	   /opt/sbin/screen -ls knock >/dev/null
-	then /opt/sbin/screen -S knock -X quit >/dev/null
+	_CheckAndStopBackground_ScreenProcess_ silent
+	_CheckAndStopBackground_DaemonProcess_ silent
+
+	if [ -s "$profileAdd" ] && \
+	   grep -q "/$shScriptName" "$profileAdd"
+	then
+		sed -i -e "\\~/${shScriptName}~d" "$profileAdd"
 	fi
-
-	#Stop any background daemon process#
-	touch "$knockLoopDaemonSEM"
-	sleep 3  #Allow time to terminate process#
-
-	sed -i -e '/knock.sh/d' "$profileAdd"
-	sed -i -e '/knock.sh/d' "$usbPostMount"
-	sed -i -e '/knock.sh/d' "$servicesStart"
-	sed -i -e '/knock.sh/d' "$firewallStart"
+	if [ -s "$usbPostMount" ] && \
+	   grep -q "/$shScriptName" "$usbPostMount"
+	then
+		sed -i -e "\\~/${shScriptName}~d" "$usbPostMount"
+	fi
+	if [ -s "$servicesStart" ] && \
+	   grep -q "/$shScriptName" "$servicesStart"
+	then
+		sed -i -e "\\~/${shScriptName}~d" "$servicesStart"
+	fi
+	if [ -s "$firewallStart" ] && \
+	   grep -q "/$shScriptName" "$firewallStart"
+	then
+		sed -i -e "\\~/${shScriptName}~d" "$firewallStart"
+	fi
 
 	rm -f "$versionFile"
 	rm -f "$developFlag"
@@ -2685,7 +2742,7 @@ then
 	echo "Knock.sh is uninstalled"
 	[ -s "$savedConfig" ] && \
 	echo "Existing configuration file saved as $savedConfig"
-	echo "Thanks for using knock.sh!"
+	echo "Thanks for using ${shScriptName}!"
 	exit 0
 fi
 
@@ -2721,7 +2778,7 @@ then
 	_DownloadFileFromRepo_ "${gitURL_REPO}/version.txt" "$versionFile"
 	if [ -s "$versionFile" ]
 	then
-		_DownloadFileFromRepo_ "${gitURL_REPO}/knock.sh" "$shScriptFile"
+		_DownloadFileFromRepo_ "${gitURL_REPO}/$shScriptName" "$shScriptFile"
 		chmod 755 "$shScriptFile"
 		$shScriptFile -install -force >/dev/null
 		$shScriptFile -start -nobanner >/dev/null
@@ -2795,7 +2852,7 @@ Read_dmesgDATA()
 {
 	local IFACE  SRCIP  MSGID  DPORT  PROTO  knockMSG  tempMSG
 
-	knockMSG="$(dmesg | grep -E '^knock.sh[[:blank:]]+' | tail -n1)"
+	knockMSG="$(dmesg | grep -E "^${shScriptName}[[:blank:]]+" | tail -n1)"
 	if [ -z "$knockMSG" ] ; then echo ; return 1 ; fi
 	tempMSG="$(echo "$knockMSG" | awk -v RS=' ' '{print}')"
 
@@ -2865,9 +2922,9 @@ if ! _CheckConfigurationFile_
 then exit 1
 fi
 
-#-----------------------------------------------#
-# Make sure ONLY ONE background loop is running.
-#-----------------------------------------------#
+#---------------------------------------------------#
+# Make sure ONLY ONE background process is running.
+#---------------------------------------------------#
 if ! _AcquireMutexFLock_
 then exit 1
 fi
