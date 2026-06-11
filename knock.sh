@@ -181,7 +181,7 @@ banner()
 	printf "| | __ _ __   ___   ___| | __   ___| |__  \n"
 	printf "| |/ /| '_ \ / _ \ / __| |/ /  / __| '_ \ \n"
 	printf "|   < | | | | (_) | (__|   <  _\__ \ | | |\n"
-	printf "|_|\_\|_| |_|\___/ \___|_|\_\(_)___/_| |_| ${GREENct}v$REV${CLEARct}\n"
+	printf "|_|\_\|_| |_|\___/ \___|_|\_\(_)___/_| |_| ${GREENct}v${REV}${CLEARct}\n"
 	echo
 }
 
@@ -2097,7 +2097,7 @@ then
 
 		case "$menuSelection" in
 			1)
-				$shScriptFile -install -force
+				$shScriptFile -install -menu
 				_StopBackgroundProcess_ -menu >/dev/null
 
 			if CheckInstall
@@ -2124,7 +2124,7 @@ then
 					if PromptYN "Are you ready to start processing knocks (start $shScriptName)? (y/n):"
 					then
 						echo
-						$shScriptFile -start -nobanner
+						$shScriptFile -start -menu
 					else
 						printf "\nWhen ready, please run start from main menu\n"
 					fi
@@ -2527,7 +2527,7 @@ then
 	else action="install"
 	fi
 
-	if [ $# -lt 2 ] || [ -z "$2" ]
+	if [ $# -lt 2 ] || [ -z "$2" ] || [ "$2" = "-menu" ]
 	then
 		printf "\nYou have the option to install/use the Entware 'screen' utility.\n"
 		printf "It will replace the built-in background process used by the script.\n"
