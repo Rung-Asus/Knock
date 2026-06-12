@@ -41,7 +41,7 @@
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jun-10
+# Last Updated: 2026-Jun-12
 ########################################################################
 
 #Update Log:
@@ -499,6 +499,7 @@ _LogMsg_()
 #-------------------------------------#
 # Added by Martinski W. [2026-May-31] #
 #-------------------------------------#
+readonly pkCHAIN="PORTKNOCK"  #Custom FW Chain#
 readonly portNUMregex="[1-9][0-9]{3,4}"
 readonly protoFLregex="[:](T(CP)?|U(DP)?)"
 readonly portT01regex="${portNUMregex}:T"
@@ -679,6 +680,43 @@ _NormalizeCSVList_()
 	echo "$1" | sed 's/^ *//; s/ *$//; s/^,*//; s/,*$//; s/,,\+/,/g'
 }
 
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-12] #
+#-------------------------------------#
+_CheckCustomFirewallRules_()
+{
+    if iptables -S INPUT | grep -qw "\b$pkCHAIN" && \
+       iptables -S "$pkCHAIN" >/dev/null 2>&1 && \
+       iptables -S "$pkCHAIN" | grep -q "\b$shScriptName"
+    then return 0
+    else return 1
+    fi
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jun-12] #
+#-------------------------------------#
+_RemoveCustomFirewallRules_()
+{
+    local ruleNumLST  ruleNUM
+
+    ruleNumLST="$(iptables -nL INPUT --line-numbers | grep -w "\b${pkCHAIN}\b" | awk '{print $1}' | sort -r)"
+    if [ -n "ruleNumLST" ]
+    then
+        ruleNumLST="$(echo "$ruleNumLST" | tr '\n' ' ' | sed 's/ *$/\n/')"
+        for ruleNUM in $ruleNumLST
+        do iptables -D INPUT "$ruleNUM" 2>/dev/null
+        done
+    fi
+    if [ $# -gt 0 ] && [ "$1" = "INPUT" ]
+    then return 0
+    fi
+    iptables -F "$pkCHAIN" 2>/dev/null
+    if [ $# -gt 0 ] && [ "$1" = "ALL" ]
+    then iptables -X "$pkCHAIN" 2>/dev/null
+    fi
+}
+
 #----------------------------------------#
 # Modified by Martinski W. [2026-Jun-06] #
 #----------------------------------------#
@@ -712,7 +750,7 @@ CheckInstall()
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-06] #
+# Modified by Martinski W. [2026-Jun-12] #
 #----------------------------------------#
 #Verify knock rules are in firewall and background process is running#
 CheckStatus()
@@ -727,7 +765,7 @@ CheckStatus()
 		then return 1
 		fi
 	fi
-	iptables -S INPUT | grep -q "\b$shScriptName" || return 1
+	_CheckCustomFirewallRules_ && return 0 || return 1
 }
 
 #-------------------------------------#
@@ -850,6 +888,13 @@ _CreateCustomFirewallRules_()
 	_LogMsg_ "Adding port knocking rules to firewall" "$pLogWARNG"
 	"$isVerboseMode" && echo
 
+	if ! iptables -S "$pkCHAIN" >/dev/null 2>&1
+	then iptables -N "$pkCHAIN"
+	else iptables -F "$pkCHAIN" 2>/dev/null
+	fi
+	iptables -D "$pkCHAIN" -j RETURN 2>/dev/null
+	iptables -I "$pkCHAIN" -j RETURN
+
 	while read -r cfgLINE
 	do
 		if [ -z "$cfgLINE" ] || \
@@ -895,6 +940,15 @@ _CreateCustomFirewallRules_()
 		then continue  #INVALID#
 		fi
 
+		for IFace in $portIFacesLst
+		do
+			if ! iptables -S INPUT | grep -qE "\-i $IFace -j ${pkCHAIN}$"
+			then
+				iptables -D INPUT -i "$IFace" -j "$pkCHAIN" 2>/dev/null
+				iptables -I INPUT -i "$IFace" -j "$pkCHAIN"
+			fi
+		done
+
 		for thePort in $portNumSeqLst
 		do
 			portN="$(echo "$thePort" | awk -F':' '{print $1}')"
@@ -909,8 +963,8 @@ _CreateCustomFirewallRules_()
 
 			for IFace in $portIFacesLst
 			do
-				iptables -D INPUT -i "$IFace" -p "$proto" -m "$proto" --dport "$portN" -j LOG --log-prefix "$shScriptName " --log-level info 2>/dev/null
-				iptables -I INPUT -i "$IFace" -p "$proto" -m "$proto" --dport "$portN" -j LOG --log-prefix "$shScriptName " --log-level info
+				iptables -D "$pkCHAIN" -i "$IFace" -p "$proto" -m "$proto" --dport "$portN" -j LOG --log-prefix "$shScriptName " --log-level info 2>/dev/null
+				iptables -I "$pkCHAIN" -i "$IFace" -p "$proto" -m "$proto" --dport "$portN" -j LOG --log-prefix "$shScriptName " --log-level info
 			done
 		done
 	done < "$configFPath"
@@ -919,7 +973,7 @@ _CreateCustomFirewallRules_()
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-06] #
+# Modified by Martinski W. [2026-Jun-12] #
 #----------------------------------------#
 #Verify no missing firewall rules#
 CheckFirewall()
@@ -929,16 +983,21 @@ CheckFirewall()
 	local portIFacesLst  portNumSeqLst  portListCount
 	local activeIFaceOK  portNumOK  pIFace  pNumber  thePort
 	local pkTempFWR="${TEMP_DIR}/${scriptFNameTag}_FWRulesPK.TMP"
+	local inTempFWR="${TEMP_DIR}/${scriptFNameTag}_FWRulesIN.TMP"
 
 	if ! _CheckConfigurationFile_ silent
 	then return 1
 	fi
 
 	#Save current firewall port knock rules#
-	iptables -S INPUT | grep "\b$shScriptName" > "$iptFW1"
+	{
+	   iptables -S INPUT | grep -w "\b${pkCHAIN}$"
+	   iptables -S "$pkCHAIN" 2>/dev/null
+	} > "$iptFW1"
 
 	printf '' > "$iptFW2"
-	printf '' > "$pkTempFWR"
+	printf '' > "$inTempFWR"
+	echo "-A $pkCHAIN -j RETURN" > "$pkTempFWR"
 
 	#Recreate rules from config file#
 	while read -r cfgLINE
@@ -986,6 +1045,14 @@ CheckFirewall()
 		then continue  #INVALID#
 		fi
 
+		for IFace in $portIFacesLst
+		do
+			ruleStr="A INPUT -i $IFace -j $pkCHAIN"
+			if ! grep -qx "\-$ruleStr" "$inTempFWR"
+			then echo "-$ruleStr" >> "$inTempFWR"
+			fi
+		done
+
 		for thePort in $portNumSeqLst
 		do
 			portN="$(echo "$thePort" | awk -F':' '{print $1}')"
@@ -1001,15 +1068,18 @@ CheckFirewall()
 			for IFace in $portIFacesLst
 			do
 			{
-			    echo "-A INPUT -i $IFace -p $proto -m $proto --dport $portN -j LOG --log-prefix \"$shScriptName \" --log-level 6"
+			    echo "-A $pkCHAIN -i $IFace -p $proto -m $proto --dport $portN -j LOG --log-prefix \"$shScriptName \" --log-level 6"
 			} >> "$pkTempFWR"
 			done
 		done
 	done < "$configFPath"
 
+	echo "-N $pkCHAIN" >> "$pkTempFWR"
+	cat "$inTempFWR" >> "$pkTempFWR"
+
 	#FW Rules in REVERSE order for comparison#
 	awk '{lines[NR]=$0} END {for (idx=NR; idx>0; idx--) print lines[idx]}' "$pkTempFWR" > "$iptFW2"
-	rm -f "$pkTempFWR"
+	rm -f "$pkTempFWR" "$inTempFWR"
 
 	#Files should match#
 	if cmp -s "$iptFW1" "$iptFW2"
@@ -1572,14 +1642,15 @@ knockMutexFLock_OK=false  #DO NOT have FLock#
 
 _ReleaseMutexFLock_()
 {
-    if [ $# -gt 0 ] && \
-       [ "$1" = "checkLockOK" ] && \
-       [ "$knockMutexFLock_OK" = "false" ]
-    then return 0
-    fi
-    printf '' > "$knockMutexFLock_FN"
-    flock -u "$knockMutexFLock_FD" 2>/dev/null
-    knockMutexFLock_OK=false
+	if [ $# -gt 0 ] && \
+	   [ "$1" = "checkLockOK" ] && \
+	   [ "$knockMutexFLock_OK" = "false" ]
+	then return 0
+	fi
+	printf '' > "$knockMutexFLock_FN"
+	flock -u "$knockMutexFLock_FD" 2>/dev/null
+	eval exec "${knockMutexFLock_FD}>&-"
+	knockMutexFLock_OK=false
 }
 
 _AcquireMutexFLock_()
@@ -1603,7 +1674,7 @@ _AcquireMutexFLock_()
     fi
 
     [ ! -s "$knockMutexFLock_FN" ] && \
-    eval exec "$knockMutexFLock_FD>$knockMutexFLock_FN"
+    eval exec "${knockMutexFLock_FD}>$knockMutexFLock_FN"
 
     if flock -x -n "$knockMutexFLock_FD" 2>/dev/null
     then
@@ -1757,7 +1828,7 @@ _WaitForCustomFirewallRules_()
 	while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
 	do
 		sleep 1
-		if iptables -S INPUT | grep -q "\b$shScriptName"
+		if _CheckCustomFirewallRules_
 		then break
 		fi
 	done
@@ -1912,7 +1983,7 @@ _CheckAndStopBackground_DaemonProcess_()
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-08] #
+# Modified by Martinski W. [2026-Jun-12] #
 #----------------------------------------#
 _StartBackgroundProcess_()
 {
@@ -1921,8 +1992,15 @@ _StartBackgroundProcess_()
 	then return 1
 	fi
 
-	service restart_firewall >/dev/null
-	sleep 1
+	_RemoveCustomFirewallRules_ INPUT
+
+    if [ $# -gt 0 ] && [ "$1" = "-menu" ]
+	then
+		_CreateCustomFirewallRules_ silent
+	else
+		service restart_firewall >/dev/null
+		sleep 1
+	fi
 
 	#Make sure ONLY ONE background process will run#
 	_CheckAndStopBackground_ScreenProcess_
@@ -2736,6 +2814,7 @@ then
 	fi
 
 	#Clean up and reset Firewall#
+	_RemoveCustomFirewallRules_ ALL
 	service restart_firewall >/dev/null
 
 	echo
@@ -3125,7 +3204,11 @@ do
         then
             thePortNum="" ; srceIPaddr=""
             _LogMsg_ "Executing [ID=$nextID] CMD: [$theCMDx $thePORTx]" "$pLogWARNG"
-            eval $theCMDx "$thePORTx" &
+            # If calling a script pass the port knock sequence #
+            if ! echo "$theCMDx" | grep -qE "($SCRIPTS_DIR|$INSTALL_DIR)/"
+            then eval $theCMDx &
+            else eval $theCMDx "$thePORTx" &
+            fi
             break  #Get Next Port Knock#
         fi
     done < "$configFPath"
