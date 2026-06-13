@@ -103,6 +103,7 @@ readonly CLEARct="\e[0m"
 readonly REDct="\e[1;31m"
 readonly GREENct="\e[1;32m"
 readonly YELLWct="\e[1;33m"
+readonly MAGNTct="\e[1;35m"
 readonly ERRORct="$REDct"
 readonly WARNGct="$YELLWct"
 
@@ -152,6 +153,11 @@ readonly cm="\xE2\x9C\x94"
 readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
 readonly FAKE_KMESG="$shScriptName IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID=$FAKE_NUMID PROTO="
 
+if [ ! -f "$developFlag" ]
+then readonly branchxStr_TAG=""
+else readonly branchxStr_TAG="[Branch: development]"
+fi
+
 readonly REPO_URL="https://raw.githubusercontent.com/Rung-Asus/Knock"
 readonly gitURL_MAIN="${REPO_URL}/main"
 readonly gitURL_DEVL="${REPO_URL}/develop"
@@ -173,6 +179,9 @@ trap 'CleanUp' HUP INT QUIT ABRT TERM
 
 #set -x
 
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jun-12] #
+#----------------------------------------#
 banner()
 {
 	clear
@@ -182,7 +191,11 @@ banner()
 	printf "| |/ /| '_ \ / _ \ / __| |/ /  / __| '_ \ \n"
 	printf "|   < | | | | (_) | (__|   <  _\__ \ | | |\n"
 	printf "|_|\_\|_| |_|\___/ \___|_|\_\(_)___/_| |_| ${GREENct}v${REV}${CLEARct}\n"
-	echo
+
+	if [ -z "$branchxStr_TAG" ]
+	then echo
+	else printf "\n${MAGNTct}%32s${CLEARct}\n\n" "$branchxStr_TAG"
+	fi
 }
 
 #----------------------------------------#
@@ -1096,7 +1109,7 @@ CheckFirewall()
 ShowStatus()
 {
 	local isFirewallOK=false
-	printf "\nPlease wait..."
+	printf "Please wait..."
 	CheckFirewall && isFirewallOK=true
 	printf "\r"
 
@@ -1145,14 +1158,14 @@ _DownloadFileFromRepo_()
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-May-31] #
+# Modified by Martinski W. [2026-Jun-12] #
 #----------------------------------------#
 UpdateScript()
 {
 	banner
 	if [ -f "$developFlag" ]
 	then
-		echo "On develop branch."
+		echo "On development branch."
 		gitURL_REPO="$gitURL_DEVL"
 	fi
 	rm -f "$versionFile" 2>/dev/null
@@ -1163,7 +1176,9 @@ UpdateScript()
 		newVer="$(cat "$versionFile" | head -n1)"
 		echo "Latest version: $newVer"
 		echo "Current version: $REV"
-		if PromptYN "Proceed with update? (y/n):"
+
+		if { [ $# -gt 0 ] && [ -n "$1" ] ; } || \
+		   PromptYN "Proceed with update? (y/n):"
 		then
 			echo -e "\nDownloading..."
 			_DownloadFileFromRepo_ "${gitURL_REPO}/$shScriptName" "$shScriptFile"
@@ -2828,12 +2843,14 @@ fi
 if [ "$1" = "-develop" ]
 then
 	touch "$developFlag"
+	UpdateScript -force
 	exit 0
 fi
 
 if [ "$1" = "-main" ]
 then
 	rm -f "$developFlag" 2>/dev/null
+	UpdateScript -force
 	exit 0
 fi
 
