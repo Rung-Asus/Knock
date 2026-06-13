@@ -73,7 +73,7 @@
 # - Merged Martinski ShowConfig, firewall code
 # - Added new firewall check to ShowStatus for missing firewall rules
 
-readonly version=2.1.0
+version=3.0.0
 readonly REV="$version"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
