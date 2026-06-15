@@ -2850,6 +2850,8 @@ fi
 if [ "$1" = "-main" ]
 then
 	rm -f "$developFlag" 2>/dev/null
+	#Compatibily for 2.x. Remove once main is >= 3.0.0
+	rm -f "$optConfFile" 2>/dev/null
 	UpdateScript -force
 	exit 0
 fi
