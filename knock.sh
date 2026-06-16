@@ -40,8 +40,11 @@
 #Many thanks to @Viktor Jaep for all his help, input and testing of this script!
 #Some concepts in this script were derved from @Viktor Jaep's awesome Tailmon script
 #Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
+#
+#Developed by Rung and Martinski
+#
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jun-12
+# Last Updated: 2026-Jun-16
 ########################################################################
 
 #Update Log:
@@ -72,6 +75,12 @@
 # - Added force kill during restart (mutext lock), added knock log level
 # - Merged Martinski ShowConfig, firewall code
 # - Added new firewall check to ShowStatus for missing firewall rules
+# 3.0.0
+# - Major overhaul by Martinski including
+#   - Daemon mode eliminating need for screen and entware
+#   - Config file to revert to screen mode, future config options
+#   - UDP knock option
+#   - Usability, performance, and stability improvements throughout
 
 version=3.0.0
 readonly REV="$version"
