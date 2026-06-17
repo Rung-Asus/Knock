@@ -1271,6 +1271,10 @@ EditPortKnockConfig()
 		header="     Port(s):"
 		editline
 		st="$(_NormalizeCSVList_ "$st")"
+
+		#Capitalize protocol letters
+		st="$(echo "$st" | tr 'udtcp' 'UDTCP')"
+
 		allGood=true
 		portCount=0
 		modPorts="$(echo "$st" | sed 's/,/ /g')"
