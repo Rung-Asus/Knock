@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jun-16
+# Last Updated: 2026-Jun-18
 ########################################################################
 
 #Update Log:
@@ -82,8 +82,9 @@
 #   - UDP knock option
 #   - Usability, performance, and stability improvements throughout
 
-version=3.0.0
+readonly version=3.0.0
 readonly REV="$version"
+readonly VERS_TAG="Beta_26061823"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -163,8 +164,12 @@ readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
 readonly FAKE_KMESG="$shScriptName IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID=$FAKE_NUMID PROTO="
 
 if [ ! -f "$developFlag" ]
-then readonly branchxStr_TAG=""
-else readonly branchxStr_TAG="[Branch: development]"
+then
+	readonly branchxStr_TAG=""
+	readonly developVer_TAG=""
+else
+	readonly branchxStr_TAG="[Branch: development]"
+	readonly developVer_TAG="[${version}_${VERS_TAG}]"
 fi
 
 readonly REPO_URL="https://raw.githubusercontent.com/Rung-Asus/Knock"
@@ -189,10 +194,11 @@ trap 'CleanUp' HUP INT QUIT ABRT TERM
 #set -x
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-12] #
+# Modified by Martinski W. [2026-Jun-18] #
 #----------------------------------------#
 banner()
 {
+	local spaceLen=45
 	clear
 	echo
 	printf " _                      _           _     \n"
@@ -201,10 +207,15 @@ banner()
 	printf "|   < | | | | (_) | (__|   <  _\__ \ | | |\n"
 	printf "|_|\_\|_| |_|\___/ \___|_|\_\(_)___/_| |_| ${GREENct}v${REV}${CLEARct}\n"
 
-	if [ -z "$branchxStr_TAG" ]
-	then echo
-	else printf "\n${MAGNTct}%32s${CLEARct}\n\n" "$branchxStr_TAG"
+	if [ -n "$branchxStr_TAG" ]
+	then
+        printf "\n${MAGNTct}%s${CLEARct}\n" "$(_CenterTextStr_ "$branchxStr_TAG" "$spaceLen")"
 	fi
+	if [ -n "$developVer_TAG" ]
+	then
+		printf "${MAGNTct}%s${CLEARct}\n" "$(_CenterTextStr_ "$developVer_TAG" "$spaceLen")"
+	fi
+	echo
 }
 
 #----------------------------------------#
@@ -438,6 +449,31 @@ function refresh {
     return 0
 }
 ###############################################
+
+##-------------------------------------##
+## Added by Martinski W. [2026-Jun-18] ##
+##-------------------------------------##
+_CenterTextStr_()
+{
+    if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "$2" ] || \
+       ! echo "$2" | grep -qE "^[1-9][0-9]+$"
+    then echo ; return 1
+    fi
+    local stringLen="${#1}"
+    local space1Len="$((($2 - stringLen)/2))"
+    local space2Len="$space1Len"
+    local totalLen="$((space1Len + stringLen + space2Len))"
+
+    if [ "$totalLen" -lt "$2" ]
+    then space2Len="$((space2Len + 1))"
+    elif [ "$totalLen" -gt "$2" ]
+    then space1Len="$((space1Len - 1))"
+    fi
+    if [ "$space1Len" -gt 0 ] && [ "$space2Len" -gt 0 ]
+    then printf "%*s%s%*s" "$space1Len" '' "$1" "$space2Len" ''
+    else printf "%s" "$1"
+    fi
+}
 
 #----------------------------------------#
 # Modified by Martinski W. [2026-May-31] #
@@ -1272,7 +1308,7 @@ EditPortKnockConfig()
 		editline
 		st="$(_NormalizeCSVList_ "$st")"
 
-		#Capitalize protocol letters
+		#Capitalize protocol letters#
 		st="$(echo "$st" | tr 'udtcp' 'UDTCP')"
 
 		allGood=true
@@ -2860,11 +2896,13 @@ then
 	exit 0
 fi
 
-if [ "$1" = "-main" ]
+if [ "$1" = "-main" ] || [ "$1" = "-stable" ]
 then
 	rm -f "$developFlag" 2>/dev/null
-	#Compatibily for 2.x. Remove once main is >= 3.0.0
+
+	#Compatibility with 2.x.x version. REMOVE once main is >= 3.0.0#
 	rm -f "$optConfFile" 2>/dev/null
+
 	UpdateScript -force
 	exit 0
 fi
