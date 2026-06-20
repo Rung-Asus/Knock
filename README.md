@@ -10,11 +10,11 @@ ssh into your router and enter the following command:
     curl --retry 3 "https://raw.githubusercontent.com/Rung-Asus/Knock/main/knock.sh" -o /jffs/scripts/knock.sh && chmod 755 /jffs/scripts/knock.sh && sh /jffs/scripts/knock.sh -install
 
 
-Next update the **knock.cfg** configuration file in the **/jffs/addons/knock.d/** directory:
+Next update the **knock.cfg** configuration file stored in the **/jffs/addons/knock.d/** directory:
 
     nano /jffs/addons/knock.d/knock.cfg
 
-Format of file is:
+Format of a Port Knock configuration line is as follows:
 
     Port Number(s)[comma separated] <space> Interface(s)[comma separated] <space> Command to execute [to end of line]
           
@@ -22,7 +22,7 @@ Finally run the following command:
 
     /jffs/scripts/knock.sh -start
 
-Users can now execute commands by sending port knocks
+Users can now execute the target commands by sending the corresponding port knocks.
 
 (e.g. for main LAN interface command, enter browser url: http://192.168.50.1:44444)
 
@@ -31,7 +31,7 @@ Run:
 
     /jffs/scripts/knock.sh -stop
         
-Then update the **/jffs/addons/knock.d/knock.cfg** config file.
+Then update the **/jffs/addons/knock.d/knock.cfg** configuration file.
 
 Finally run:
 
@@ -45,16 +45,16 @@ run:
 
 ## Port Knocks using UDP and TCP protocols
 
-Users can define Port Knock rules using either **UDP** or **TCP** protocol, or a combination of those.
+Users can define Port Knock rules using either **UDP** or **TCP** protocol, or a any combination of those.
 
-In the configuration file, users must indicate a **UDP** port with either a '**:U**' or '**:UDP**' tag as shown below:
+In the configuration file, users must indicate a **UDP** port with either a **':U'** or **':UDP'** tag as shown below:
 
 ```sh
    50102:U,50104:U,50108:U br0 command_to_send
    50202:UDP,50204:UDP,50208:UDP br0 command_to_send
 ```
 
-When using **TCP** ports, no tags are required since the default setting is TCP, but users may still tag TCP ports if they so desire with either a '**:T**' or '**:TCP**' tag like so: 
+When using **TCP** ports, no tags are required since the default setting is TCP, but users may still tag TCP ports if they so desire with either a **':T'** or **':TCP'** tag like so: 
 
 ```sh
    50102:T,50104:T,50108:T br0 command_to_send
