@@ -31,7 +31,7 @@ Run:
 
     /jffs/scripts/knock.sh -stop
         
-Then update the **/jffs/addons/knock.d/knock.cfg** configuration file.
+Then edit/modify and save the **/jffs/addons/knock.d/knock.cfg** configuration file.
 
 Finally run:
 
@@ -45,7 +45,7 @@ run:
 
 ## Port Knocks using UDP and TCP protocols
 
-Users can define Port Knock rules using either **UDP** or **TCP** protocol, or a any combination of those.
+Users can define Port Knock rules using either **UDP** or **TCP** protocol, or any combination of those.
 
 In the configuration file, users must indicate a **UDP** port with either a '**:U**' or '**:UDP**' tag as shown below:
 
@@ -73,7 +73,7 @@ Users can define Multi-Port Knock rules using up to **6** unique ports in the se
 Example:
 
     50101:UDP,50202:TCP,50303:UDP,50404:TCP,50505:UDP br0 command_to_send
-
+
 Note that each Port Knock rule is expected to use unique port numbers; otherwise, rules containing duplicate ports are considered invalid. However, using the same port number with a different protocol tag would **not** be considered a duplicate. For instance, ports '**50123:UDP**' and '**50123:TCP**' are treated as different ports.
 
 
