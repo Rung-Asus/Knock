@@ -1,5 +1,5 @@
 # Knock
-Knock: Router Commands for non-admin users
+Knock: Router commands for non-admin users
 
 ## v3.0.0
 ### Updated on 2026-Jun-19
@@ -47,21 +47,21 @@ run:
 
 Users can define Port Knock rules using either **UDP** or **TCP** protocol, or a any combination of those.
 
-In the configuration file, users must indicate a **UDP** port with either a **':U'** or **':UDP'** tag as shown below:
+In the configuration file, users must indicate a **UDP** port with either a '**:U**' or '**:UDP**' tag as shown below:
 
 ```sh
    50102:U,50104:U,50108:U br0 command_to_send
    50202:UDP,50204:UDP,50208:UDP br0 command_to_send
 ```
 
-When using **TCP** ports, no tags are required since the default setting is TCP, but users may still tag TCP ports if they so desire with either a **':T'** or **':TCP'** tag like so: 
+When using **TCP** ports, no tags are required since the default setting is TCP, but users may still tag TCP ports if they so desire with either a '**:T**' or '**:TCP**' tag like so: 
 
 ```sh
    50102:T,50104:T,50108:T br0 command_to_send
    50202:TCP,50204:TCP,50208:TCP br0 command_to_send
 ```
 
-Note that only uppercase letters are considered valid; otherwise, the rule is ignored, and an error will be reported when checking/parsing the configuration file.
+Note that only **uppercase** letters are considered valid; otherwise, the rule is ignored, and an error will be reported when checking/parsing the configuration file.
 
 When adding/editing a Port Knock rule using the built-in "editor" function, the code will check and automatically modify lowercase tags to uppercase to prevent such user errors.
 
