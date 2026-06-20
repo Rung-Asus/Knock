@@ -68,7 +68,7 @@ When adding/editing a Port Knock rule using the built-in "editor" function, the 
 
 ## Multi-Port Knock Sequences
 
-Users can define Multi-Port Knock rules using up to **6** unique ports in the sequence. A port sequence may use a combination of **UDP** and **TCP** ports.
+Users can define Multi-Port Knock rules using up to **6** different ports in the sequence. A port sequence may use a combination of **UDP** and **TCP** ports.
 
 Example:
 
@@ -79,7 +79,7 @@ Note that each Port Knock rule is expected to use unique port numbers; otherwise
 
 ## Entware is **not** required
 
-The script no longer requires to have Entware installed. Installing and using the Entware 'screen' utility is now completely optional. Instead, the script creates a built-in background process running as a daemon.
+The script no longer requires Entware to be installed. Installing and using the Entware 'screen' utility is now completely optional. Instead, the script creates a built-in background process running as a daemon.
 
 
 ## Example Use Cases
@@ -119,7 +119,7 @@ Other use case possibilities from @Victor Jaep include:
 3. Initiate a WAN failover with the wan_failover script
 
 ## Acknowledgments
-The latest 3.0.0 release version was a joint, collaborative effort between @Rung and @Martinski.
+The latest 3.0.0 release version was a collaborative effort between @Rung and @Martinski.
 
 Many thanks to @Viktor Jaep for all his help, input and testing of the initial script!
 
