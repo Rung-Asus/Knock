@@ -119,8 +119,10 @@ Other use case possibilities from @Victor Jaep include:
 3. Initiate a WAN failover with the wan_failover script
 
 ## Acknowledgments
-Many thanks to @Viktor Jaep for all his help, input and testing of this script!
+The latest 3.0.0 release version was a joint, collaborative effort between @Rung and @Martinski.
 
-Portions in this script were derved from @Viktor Jaep's awesome Tailmon script
+Many thanks to @Viktor Jaep for all his help, input and testing of the initial script!
+
+Portions in this script were derived from @Viktor Jaep's awesome Tailmon script
 
 Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
