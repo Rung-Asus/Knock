@@ -68,13 +68,15 @@ When adding/editing a Port Knock rule using the built-in "editor" function, the 
 
 ## Multi-Port Knock Sequences
 
-Users can define Multi-Port Knock rules using up to **6** different ports in the sequence. A port sequence may use a combination of **UDP** and **TCP** ports.
+Users can define Multi-Port Knock rules using up to **6** different ports in the sequence. A multi-port sequence may use any combination of **UDP** and **TCP** ports.
 
 Example:
 
     50101:UDP,50202:TCP,50303:UDP,50404:TCP,50505:UDP br0 Command-to-Execute
 
 Note that each Port Knock rule is expected to use unique port numbers; otherwise, rules containing duplicate ports are considered invalid. However, using the same port number with a **different** protocol tag would **not** be considered a duplicate. For instance, ports '**50123:UDP**' and '**50123:TCP**' are treated as different ports.
+
+When sending a Multi-Port Knock sequence, each successive knock in the combination must be separated from the previous knock by at least 8 seconds, but no more than 22 seconds.
 
 
 ## Entware is **not** required
