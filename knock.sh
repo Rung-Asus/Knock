@@ -81,10 +81,11 @@
 #   - Config file to revert to screen mode, future config options
 #   - UDP knock option
 #   - Usability, performance, and stability improvements throughout
+# - Updated URL display for new UDP/TCP tags
 
 readonly version=3.0.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26061823"
+readonly VERS_TAG="Beta_26062219"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -1477,10 +1478,17 @@ EditPortKnockConfig()
 				IFaceIPaddr="$(_Get_IFace_IPAddress_ "$pIFace")"
 
 				if [ "$portListCount" -eq 1 ]
-				then printf "\tURL to send port knock: "
-				else printf "\tURL to initiate port knock sequence: "
+				then printf "\tURL/command to send port knock: "
+				else printf "\tURL/command to initiate port knock sequence: "
 				fi
-				printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx"
+
+				#Fix URL of new TCP/UDP tags
+				portNx2="$(echo "$portNx" | awk -F':' '{print $1}')"
+				if echo "$portNx" | grep -q ":U"
+				then echo "nc -vz -u $IFaceIPaddr $portNx2"
+				else printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx2"
+				fi
+
 
 				if [ "$portListCount" -gt 1 ]
 				then
@@ -1492,7 +1500,14 @@ EditPortKnockConfig()
 						then printf "\t\tWait $((INTERVAL * 3)) seconds to send next port knock: "
 						else printf "\t\tWait $((INTERVAL * 3)) seconds to complete knock sequence: "
 						fi
-						printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx"
+
+						#Fix URL of new TCP/UDP tags
+						portNx2="$(echo "$portNx" | awk -F':' '{print $1}')"
+						if echo "$portNx" | grep -q ":U"
+						then echo "nc -vz -u $IFaceIPaddr $portNx2"
+						else printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx2"
+						fi
+
 					done
 				fi
 				echo
@@ -1841,10 +1856,16 @@ ShowConfig()
 			IFaceIPaddr="$(_Get_IFace_IPAddress_ "$pIFace")"
 
 			if [ "$portListCount" -eq 1 ]
-			then printf "\tURL to send port knock: "
-			else printf "\tURL to initiate port knock sequence: "
+			then printf "\tURL/command to send port knock: "
+			else printf "\tURL/command to initiate port knock sequence: "
 			fi
-			printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx"
+
+			#Fix URL of new TCP/UDP tags
+			portNx2="$(echo "$portNx" | awk -F':' '{print $1}')"
+			if echo "$portNx" | grep -q ":U"
+			then echo "nc -vz -u $IFaceIPaddr $portNx2"
+			else printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx2"
+			fi
 
 			if [ "$portListCount" -gt 1 ]
 			then
@@ -1852,11 +1873,23 @@ ShowConfig()
 				while [ "$((++pNumber))" -le "$portListCount" ]
 				do
 					portNx="$(echo "$portNumSeqLst" | awk -v fn="$pNumber" -F' ' '{print $fn}')"
+
+					#Fix URL of new TCP/UDP tags
+					portNx2="$(echo "$portNx" | awk -F':' '{print $1}')"
+
+
 					if [ "$pNumber" -lt "$portListCount" ]
 					then printf "\t\tWait $((INTERVAL * 3)) seconds to send next port knock: "
 					else printf "\t\tWait $((INTERVAL * 3)) seconds to complete knock sequence: "
 					fi
-					printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx"
+
+
+					if echo "$portNx" | grep -q ":U"
+					then echo "nc -vz -u $IFaceIPaddr $portNx2"
+					else printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx2"
+					fi
+
+
 				done
 			fi
 			echo
