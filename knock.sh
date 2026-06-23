@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jun-18
+# Last Updated: 2026-Jun-22
 ########################################################################
 
 #Update Log:
@@ -85,7 +85,7 @@
 
 readonly version=3.0.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26062219"
+readonly VERS_TAG="Beta_26062223"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -1472,7 +1472,7 @@ EditPortKnockConfig()
 					continue
 				fi
 
-				#Display URLs#
+				#Display URLs/Commands#
 				portNx="$(echo "$kPorts" | awk -F',' '{print $1}')"
 				pIFace="$(echo "$IFaces" | awk -F',' '{print $1}')"
 				IFaceIPaddr="$(_Get_IFace_IPAddress_ "$pIFace")"
@@ -1482,13 +1482,14 @@ EditPortKnockConfig()
 				else printf "\tURL/command to initiate port knock sequence: "
 				fi
 
-				#Fix URL of new TCP/UDP tags
+				#Fix URL of new TCP/UDP tags#
 				portNx2="$(echo "$portNx" | awk -F':' '{print $1}')"
 				if echo "$portNx" | grep -q ":U"
-				then echo "nc -vz -u $IFaceIPaddr $portNx2"
-				else printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx2"
+				then
+					printf "${GREENct}nc -vz -u %s %s${CLEARct}\n" "$IFaceIPaddr" "$portNx2"
+				else
+					printf "${GREENct}http://%s:%s${CLEARct}\n" "$IFaceIPaddr" "$portNx2"
 				fi
-
 
 				if [ "$portListCount" -gt 1 ]
 				then
@@ -1496,18 +1497,20 @@ EditPortKnockConfig()
 					while [ "$((++pNumber))" -le "$portListCount" ]
 					do
 						portNx="$(echo "$portNumSeqLst" | awk -v fn="$pNumber" -F' ' '{print $fn}')"
+
 						if [ "$pNumber" -lt "$portListCount" ]
 						then printf "\t\tWait $((INTERVAL * 3)) seconds to send next port knock: "
 						else printf "\t\tWait $((INTERVAL * 3)) seconds to complete knock sequence: "
 						fi
 
-						#Fix URL of new TCP/UDP tags
+						#Fix URL of new TCP/UDP tags#
 						portNx2="$(echo "$portNx" | awk -F':' '{print $1}')"
 						if echo "$portNx" | grep -q ":U"
-						then echo "nc -vz -u $IFaceIPaddr $portNx2"
-						else printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx2"
+						then
+							printf "${GREENct}nc -vz -u %s %s${CLEARct}\n" "$IFaceIPaddr" "$portNx2"
+						else
+							printf "${GREENct}http://%s:%s${CLEARct}\n" "$IFaceIPaddr" "$portNx2"
 						fi
-
 					done
 				fi
 				echo
@@ -1776,7 +1779,7 @@ _AcquireMutexFLock_()
 #----------------------------------------#
 ShowConfig()
 {
-	local lastComment  commandNum=0  portNx  IFaceIPaddr
+	local lastComment  commandNum=0  portNx  portNx2  IFaceIPaddr
 	local portIFacesLst  portNumSeqLst  portListCount
 	local activeIFaceOK  portNumOK  pIFace  pNumber
 	local fullPortLIST=""  dupPortLIST=""  silentARG=""
@@ -1850,7 +1853,7 @@ ShowConfig()
 				continue
 			fi
 
-			#Display URLs#
+			#Display URLs/Commands#
 			portNx="$(echo "$thePORTS" | awk -F',' '{print $1}')"
 			pIFace="$(echo "$theIFACE" | awk -F',' '{print $1}')"
 			IFaceIPaddr="$(_Get_IFace_IPAddress_ "$pIFace")"
@@ -1860,11 +1863,13 @@ ShowConfig()
 			else printf "\tURL/command to initiate port knock sequence: "
 			fi
 
-			#Fix URL of new TCP/UDP tags
+			#Fix URL of new TCP/UDP tags#
 			portNx2="$(echo "$portNx" | awk -F':' '{print $1}')"
 			if echo "$portNx" | grep -q ":U"
-			then echo "nc -vz -u $IFaceIPaddr $portNx2"
-			else printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx2"
+			then
+				printf "${GREENct}nc -vz -u %s %s${CLEARct}\n" "$IFaceIPaddr" "$portNx2"
+			else
+				printf "${GREENct}http://%s:%s${CLEARct}\n" "$IFaceIPaddr" "$portNx2"
 			fi
 
 			if [ "$portListCount" -gt 1 ]
@@ -1874,22 +1879,19 @@ ShowConfig()
 				do
 					portNx="$(echo "$portNumSeqLst" | awk -v fn="$pNumber" -F' ' '{print $fn}')"
 
-					#Fix URL of new TCP/UDP tags
-					portNx2="$(echo "$portNx" | awk -F':' '{print $1}')"
-
-
 					if [ "$pNumber" -lt "$portListCount" ]
 					then printf "\t\tWait $((INTERVAL * 3)) seconds to send next port knock: "
 					else printf "\t\tWait $((INTERVAL * 3)) seconds to complete knock sequence: "
 					fi
 
-
+					#Fix URL of new TCP/UDP tags#
+					portNx2="$(echo "$portNx" | awk -F':' '{print $1}')"
 					if echo "$portNx" | grep -q ":U"
-					then echo "nc -vz -u $IFaceIPaddr $portNx2"
-					else printf "http://%s:%s\n" "$IFaceIPaddr" "$portNx2"
+					then
+						printf "${GREENct}nc -vz -u %s %s${CLEARct}\n" "$IFaceIPaddr" "$portNx2"
+					else
+						printf "${GREENct}http://%s:%s${CLEARct}\n" "$IFaceIPaddr" "$portNx2"
 					fi
-
-
 				done
 			fi
 			echo
