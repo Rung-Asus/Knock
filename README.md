@@ -1,66 +1,118 @@
 # Knock
-Knock: Router Commands for non-admin users
+Knock: Router commands for non-admin users
 
-## To install
+## v3.0.0
+### Updated on 2026-Jun-29
+
+## Installation
 ssh into your router and enter the following command:
 
-      curl --retry 3 "https://raw.githubusercontent.com/Rung-Asus/Knock/main/knock.sh" -o /jffs/scripts/knock.sh && chmod 755 /jffs/scripts/knock.sh && sh /jffs/scripts/knock.sh -install
+    curl --retry 3 "https://raw.githubusercontent.com/Rung-Asus/Knock/main/knock.sh" -o /jffs/scripts/knock.sh && chmod 755 /jffs/scripts/knock.sh && sh /jffs/scripts/knock.sh -install
 
 
-Next update knock.cfg configuration file in the /jffs/addons/knock.d/ folder:
+Next update the **knock.cfg** configuration file stored in the **/jffs/addons/knock.d/** directory:
 
+    nano /jffs/addons/knock.d/knock.cfg
 
-      nano /jffs/addons/knock.d/knock.cfg
+Format of a Port Knock configuration line is as follows:
 
-Format of file is:
+    Port Number(s)[comma separated] <space> Interface(s)[comma separated] <space> Command-to-Execute [to end of line]
 
-Port Number \<space> Interface(s) [comma separated] \<space> Command to execute [to end of line] (see example section)
-          
 Finally run the following command: 
 
-      /jffs/scripts/knock.sh -start
+    /jffs/scripts/knock.sh -start
 
-Users can now execute commands by sending port knocks
+Users can now execute the target commands by sending the corresponding port knocks.
 
-(e.g. for main lan interface command, enter browser url: http://192.168.50.1:44444)
+(e.g. for main LAN interface command, enter browser url: http://192.168.50.1:44444)
 
 ## To Update Configuration
 Run:
 
-      /jffs/scripts/knock.sh -stop
+    /jffs/scripts/knock.sh -stop
         
-Then update '/jffs/addons/knock.d/knock.cfg'
+Then edit/modify and save the **/jffs/addons/knock.d/knock.cfg** configuration file.
 
 Finally run:
 
-      /jffs/scripts/knock.sh -start
+    /jffs/scripts/knock.sh -start
 
-## To Uninstall
+## Uninstallation
 run:
 
-      /jffs/scripts/knock.sh -uninstall
+    /jffs/scripts/knock.sh -uninstall
+
+
+## Port Knocks using UDP and TCP protocols
+
+Users can define Port Knock rules using either the **UDP** or **TCP** protocol, or any combination of those.
+
+In the configuration file, users must indicate a **UDP** port with either a '**:U**' or '**:UDP**' tag as shown below:
+
+```sh
+   50102:U,50104:U,50108:U br0 Command-to-Execute
+   50202:UDP,50204:UDP,50208:UDP br0 Command-to-Execute
+```
+
+When using **TCP** ports, no tags are required since the default setting is TCP, but users may still tag TCP ports if they so desire with either a '**:T**' or '**:TCP**' tag like so: 
+
+```sh
+   50102:T,50104:T,50108:T br0 Command-to-Execute
+   50202:TCP,50204:TCP,50208:TCP br0 Command-to-Execute
+```
+
+Note that only **uppercase** letters are considered valid; otherwise, the rule is ignored, and an error will be reported when checking/parsing the configuration file.
+
+When adding/editing a Port Knock rule using the built-in "editor" function, the code will check and automatically modify lowercase tags to uppercase to prevent such user errors.
+
+
+## Multi-Port Knock Sequences
+
+Users can define Multi-Port Knock rules using up to **6** different ports in the sequence. A multi-port sequence may use any combination of **UDP** and **TCP** ports.
+
+Example:
+
+    50101:UDP,50202:TCP,50303:UDP,50404:TCP,50505:UDP br0 Command-to-Execute
+
+Note that each Port Knock rule is expected to use unique port numbers; otherwise, rules containing duplicate ports are considered invalid. However, using the same port number with a **different** protocol tag would **not** be considered a duplicate. For instance, ports '**50123:UDP**' and '**50123:TCP**' are treated as different ports.
+
+When sending a Multi-Port Knock sequence, each successive knock in the combination must be separated from the previous knock by at least 8 seconds, but no more than 22 seconds.
+
+
+## Entware is **not** required
+
+The script no longer requires Entware to be installed. Installing and using the Entware 'screen' utility is now completely optional. Instead, the script creates a built-in background process running as a daemon.
+
 
 ## Example Use Cases
 
-1. Allow a user on local LAN, using the wireguard server, or Tailscale server to wake up a specific PC
+1. Allow a user on local LAN, using the WireGuard server, or Tailscale server to wake up a specific PC
 
 Put the following line in the config file:
 
-44444 br0,lo,wgs1 ether-wake -i br0 xx:xx:xx:xx:xx:xx
+```sh
+    44444 br0,lo,wgs1 ether-wake -i br0 xx:xx:xx:xx:xx:xx
+```
 
 The user now executes this command with http://192.168.50.1:44444, for example
 
 2. Allow same user to reboot router
 
-44445 br0,lo,wgs1 reboot
+```sh
+    44445 br0,lo,wgs1 reboot
+```
 
 3. Allow a user on the local LAN to run a custom script that enables something (e.g. a VPN Director rule)
 
-44446 br0 /jffs/scripts/enable-example.sh
+```sh
+    44446 br0 /jffs/scripts/enable-example.sh
+```
 
 4. Same user to run a complementary disable script
 
-44447 br0 /jffs/scripts/disable-example.sh
+```sh
+    44447 br0 /jffs/scripts/disable-example.sh
+```
 
 Other use case possibilities from @Victor Jaep include:
 
@@ -69,8 +121,10 @@ Other use case possibilities from @Victor Jaep include:
 3. Initiate a WAN failover with the wan_failover script
 
 ## Acknowledgments
-Many thanks to @Viktor Jaep for all his help, input and testing of this script!
+The latest 3.0.0 release version was a collaborative effort between @Rung and @Martinski.
 
-Portions in this script were derved from @Viktor Jaep's awesome Tailmon script
+Many thanks to @Viktor Jaep for all his help, input and testing of the initial script!
+
+Portions in this script were derived from @Viktor Jaep's awesome Tailmon script
 
 Original concept credit to @RMerlin (https://www.snbforums.com/threads/wake-on-lan-per-http-https-script.7958/post-47811)
