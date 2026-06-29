@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jun-22
+# Last Updated: 2026-Jun-29
 ########################################################################
 
 #Update Log:
@@ -82,10 +82,10 @@
 #   - UDP knock option
 #   - Usability, performance, and stability improvements throughout
 # - Updated URL display for new UDP/TCP tags
-
+# - Removed code for 2.x compatibility during beta
 readonly version=3.0.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26062223"
+readonly VERS_TAG="Beta_26062914"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -2934,9 +2934,6 @@ fi
 if [ "$1" = "-main" ] || [ "$1" = "-stable" ]
 then
 	rm -f "$developFlag" 2>/dev/null
-
-	#Compatibility with 2.x.x version. REMOVE once main is >= 3.0.0#
-	rm -f "$optConfFile" 2>/dev/null
 
 	UpdateScript -force
 	exit 0
