@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jun-29
+# Last Updated: 2026-Jul-20
 ########################################################################
 
 #Update Log:
@@ -83,9 +83,12 @@
 #   - Usability, performance, and stability improvements throughout
 # - Updated URL display for new UDP/TCP tags
 # - Removed code for 2.x compatibility during beta
-readonly version=3.0.0
+# 3.1.0
+# - Added clipboard paste capability to editor
+
+readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26062914"
+readonly VERS_TAG="Beta_26072015"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -299,7 +302,9 @@ function keypress2 {
 	 30) keypress2="^^"${keypress:1};;
 	 31) keypress2="^_"${keypress:1};;
 	 127) keypress2="<BCK>";;
-	 *) keypress2=$keypress;;
+	 # Force return of single character
+	 #*) keypress2=$keypress;;
+	 *) keypress2=${keypress:0:1};;
  	esac
 	return ${#keypress2}
 }
@@ -421,7 +426,9 @@ function refresh {
 			echo -ne $restorecursor
 		fi;;
 	 *)
-		if [ ${#keypress2} -eq 1 ]; then
+		#Adding clipboard paste capability
+		#if [ ${#keypress2} -eq 1 ]; then
+		if [ ${#keypress} -eq 1 ]; then
 			if [ $pos -eq $bufsize ]; then
 				offset=$((offset + 1))
 				pos=$((pos - 1))
@@ -439,6 +446,43 @@ function refresh {
 			st="${st:0:$((offset+pos))}""$keypress2""${st:$((offset+pos))}"
 			buf="${st:$offset:$bufsize}"
 			pos=$((pos+1))
+
+		#handle multicharacter paste
+		elif [ ${#keypress} -gt 1 ]; then
+			i=0
+			#iterate the paste sequence like a keyboard entry
+			while [ $i -lt ${#keypress} ]; do
+				#Filter out unhandled control chars and escape sequences
+				d=$(printf "%d" "'${keypress:$i:1}")
+				case $d in
+				 9 | 13) i=$(($i+1))
+					continue;;
+
+				 [1-8] | 1[0-9] | 2[0-7])
+					break;;
+				 29 | 30 | 31 | 127)
+					break;;
+				esac
+
+				if [ $pos -eq $bufsize ]; then
+					offset=$((offset + 1))
+					pos=$((pos - 1))
+					refresh
+				fi
+				mr=$(( ${#buf} == $bufsize ? 1 : 0 ))
+				buf="${st:$offset:$((bufsize-1))}"
+				echo -n "${keypress:$i:1}"
+				echo -ne $savecursor$clearline
+				echo -n "${buf:$pos}"
+				if [ $mr -eq 1 ]; then
+					echo -ne $moreright
+				fi
+				echo -ne $restorecursor
+				st="${st:0:$((offset+pos))}""${keypress:$i:1}""${st:$((offset+pos))}"
+				buf="${st:$offset:$bufsize}"
+				pos=$((pos+1))
+				i=$(($i+1))
+			done
 		fi;;
 	esac
 
