@@ -85,10 +85,11 @@
 # - Removed code for 2.x compatibility during beta
 # 3.1.0
 # - Added clipboard paste capability to editor
+# - Fixed wrong version displayed after update
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26072015"
+readonly VERS_TAG="Beta_26072102"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -1279,7 +1280,10 @@ UpdateScript()
 			$shScriptFile -start -nobanner
 			echo "Update completed."
 			echo
-			echo -e "Knock version:\t$REV"
+
+			#Fix wrong version displayed
+			#echo -e "Knock version:\t$REV"
+			$shScriptFile -version
 			ShowStatus
 			ShowConfig quietCheck
 		else
@@ -2554,6 +2558,13 @@ then
 	_Launch_KnockWaitTimer_BGScript_ "$@"
 	exit 0
 fi
+
+#Added option for update version display
+if [ "$1" = "-version" ]; then
+	echo -e "Knock version:\t$REV"
+	exit 0
+fi
+
 
 if [ "$1" = "-status" ]
 then
