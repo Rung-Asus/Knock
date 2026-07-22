@@ -89,7 +89,7 @@
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26072102"
+readonly VERS_TAG="Beta_26072219"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -1349,12 +1349,20 @@ EditPortKnockConfig()
 		st="$comment"
 		header="     Comment:"
 		editline
+
+		#Check for blank output
+		[ -n "$st" ] || st="#"
+
 		comment="$st"
 
 		#Edit ports#
 		st="$ports"
 		header="     Port(s):"
 		editline
+
+		#Check for blank output
+		[ -n "$st" ] || st="#"
+
 		st="$(_NormalizeCSVList_ "$st")"
 
 		#Capitalize protocol letters#
@@ -1392,6 +1400,10 @@ EditPortKnockConfig()
 		st="$interfaces"
 		header="Interface(s):"
 		editline
+
+		#Check for blank output
+		[ -n "$st" ] || st="#"
+
 		st="$(_NormalizeCSVList_ "$st")"
 		allGood=true
 		for pIFace in $(echo "$st" | sed 's/,/ /g')
@@ -1413,6 +1425,10 @@ EditPortKnockConfig()
 		st="$cmd"
 		header="     Command:"
 		editline
+
+		#Check for blank output
+		[ -n "$st" ] || st="#"
+
 		cmd="$st"
 		"$errorFound" && return 1 || return 0
 	}
