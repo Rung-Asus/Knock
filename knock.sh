@@ -86,10 +86,11 @@
 # 3.1.0
 # - Added clipboard paste capability to editor
 # - Fixed wrong version displayed after update
+# - Ugraded editor to navigatable fields
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26072219"
+readonly VERS_TAG="Beta_26072316"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -163,6 +164,25 @@ readonly firewallStart="${SCRIPTS_DIR}/firewall-start"
 readonly servicesStart="${SCRIPTS_DIR}/services-start"
 readonly developFlag="${INSTALL_DIR}/develop"
 readonly cm="\xE2\x9C\x94"
+
+
+#Variables for field editor
+readonly uprow="\e[1A"
+readonly uprow2="\e[2A"
+readonly uprow3="\e[3A"
+readonly uprow4="\e[4A"
+readonly dnrow="\e[1B"
+readonly dnrow2="\e[2B"
+readonly dnrow3="\e[3B"
+readonly dnrow4="\e[4B"
+readonly wrapoff="\e[?7l"
+readonly wrapon="\e[?7h"
+readonly linehelp1g="${wrapoff}| ${GREENct}Enter a comment for this port command${CLEARct}${wrapon}"
+readonly linehelp2g="${wrapoff}| ${GREENct}Enter the knock port(s) [comma separated]. Use xxxx:U syntax for UDP knocks. ${CLEARct}${wrapon}"
+readonly linehelp3g="${wrapoff}| ${GREENct}Enter the incoming knock interface(s) [comma separated]${CLEARct}${wrapon}"
+readonly linehelp4g="${wrapoff}| ${GREENct}Enter the command to be executed when this knock is received${CLEARct}${wrapon}"
+
+
 
 #To handle ID field from iOS always being ZERO#
 readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
@@ -248,8 +268,8 @@ function editline {
 #	$st = current data in edit string
 #Output:
 #	$st = user edited version of string
-#	$keypress2 = exit key (currently only
-#           "<ENT>" = enter will exit editting)
+#	$keypress2 = exit key ("<ENT>" = enter,
+#                     "<UP>" = up, "<DN>" = down)
 #
 #Note: $st should only a single line of ascii
 # characters w/o control charaters (tabs will
@@ -360,9 +380,11 @@ function refresh {
  #set -x
 
 	case "$keypress2" in
-	 "<ENT>")
+	 "<ENT>" | "<DN>" | "<UP>")
 		echo ""
 		break;;
+	 "<TAB>" | "^[")
+		;;
 	 "<END>")
 		pos=$((${#buf}))
 		if [ $((${#st}-$offset)) -gt $bufsize ]; then
@@ -427,9 +449,8 @@ function refresh {
 			echo -ne $restorecursor
 		fi;;
 	 *)
-		#Adding clipboard paste capability
-		#if [ ${#keypress2} -eq 1 ]; then
 		if [ ${#keypress} -eq 1 ]; then
+			keypress2=${keypress2:0:1}
 			if [ $pos -eq $bufsize ]; then
 				offset=$((offset + 1))
 				pos=$((pos - 1))
@@ -1340,97 +1361,142 @@ EditPortKnockConfig()
 		done
 	}
 
-	EditPortKnockEntry()
-	{
-		local portCount  errorFound=false
-		local pNumber  pIFace  allGood  portCount
+     EditPortKnockEntry()
+        {
 
-		#Edit comment#
-		st="$comment"
-		header="     Comment:"
-		editline
+		local linehelp1=$linehelp1g
+		local linehelp2=$linehelp2g
+		local linehelp3=$linehelp3g
+		local linehelp4=$linehelp4g
 
-		#Check for blank output
-		[ -n "$st" ] || st="#"
+                local pNumber  pIFace  allGood  portCount
+		local linenum=1
 
-		comment="$st"
+		local cols=$(stty size | awk '{print $2}')   #Console width#
+		local dashes="+$(head -c "$((cols-1))" </dev/zero | tr '\0' '-')"
 
-		#Edit ports#
-		st="$ports"
-		header="     Port(s):"
-		editline
+		#Initial help#
+		printf "\nEnter knock parameters below. Navigate w/ <UP> and <DN>, <SHIFT><INS> for clipboard paste, <ENT> when done.\n$dashes\n"
+		printf "|\n|\n|\n|\n\n\n${uprow}${dashes}\r${uprow4}${uprow}" #Draw lower bounding box#
 
-		#Check for blank output
-		[ -n "$st" ] || st="#"
+		while true ; do
+			case $linenum in
+			 1)
+				printf "${dnrow4}${clearline}$linehelp1${uprow4}"
+		                header="|      Comment:"
+		                st="$comment"
+				editline
+		                [ -n "$st" ] || st="#" #Check for blank output#
+		                comment="$st"
+				if [ $keypress2 == "<UP>" ]; then
+					printf "${uprow}"
+				else
+					linenum=2
+				fi
+				;;
+			 2)
+				printf "${dnrow3}${clearline}$linehelp2${uprow3}"
+		                header="|      Port(s):"
+		                st="$ports"
+				editline
+		                [ -n "$st" ] || st="#" #Check for blank output#
+		                st="$(_NormalizeCSVList_ "$st")"
+		                st="$(echo "$st" | tr 'udtcp' 'UDTCP')" #Capitaliize protocol letters#
+		                allGood=true
+		                portCount=0
+		                modPorts="$(echo "$st" | sed 's/,/ /g')"
+		                _AddModPortsToFullList_ "$ports" "$modPorts"
+		                for pNumber in $modPorts
+		                do
+		                        portCount="$((portCount + 1))"
+		                        if ! _ValidatePortNumber_ "$pNumber" silent
+		                        then allGood=false
+		                        fi
+		                        if _CheckDupPortFound_ "$pNumber" silent
+		                        then allGood=false
+		                        fi
+		                done
+		                if [ "$portCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
+		                then
+					linehelp2="${wrapoff}| ${REDct}**ERROR**: INVALID number of ports [$st] found. Try again!${CLEARct}${wrapon}"
+					printf "${uprow}"
+					continue
+		                fi
+		                if "$allGood"
+		                then
+					linehelp2=$linehelp2g
+		                        ports="$st"
+		                else
+					linehelp2="${wrapoff}| ${REDct}Port list [$st] is ${ERRORct}INVALID. Try again!${CLEARct}${wrapon}"
+					printf "${uprow}"
+					continue
+		                fi
 
-		st="$(_NormalizeCSVList_ "$st")"
+				if [ $keypress2 == "<UP>" ]; then
+					printf "${uprow2}"
+					linenum=1
+				else
+					linenum=3
+				fi
+				;;
 
-		#Capitalize protocol letters#
-		st="$(echo "$st" | tr 'udtcp' 'UDTCP')"
+			 3)
+				printf "${dnrow2}${clearline}$linehelp3${uprow2}"
+		                header="| Interface(s):"
+		                st="$interfaces"
+				editline
+		                [ -n "$st" ] || st="#" #Check for blank output
+		                st="$(_NormalizeCSVList_ "$st")"
+		                allGood=true
+		                for pIFace in $(echo "$st" | sed 's/,/ /g')
+		                do
+		                        if _CheckInterface_ "$pIFace" silent
+		                        then continue
+		                        fi
+		                        allGood=false  #INACTIVE IFace#
+		                done
+		                if "$allGood"
+		                then
+					linehelp3=$linehelp3g
+		                        interfaces="$st"  #ACTIVE IFace(s)#
+		                else
+					linehelp3="${wrapoff}| ${REDct}Interface list [$st] is ${ERRORct}INVALID. Try again!${CLEARct}${wrapon}"
+					printf "${uprow}"
+					continue
+		                fi
 
-		allGood=true
-		portCount=0
-		modPorts="$(echo "$st" | sed 's/,/ /g')"
-		_AddModPortsToFullList_ "$ports" "$modPorts"
+				if [ $keypress2 == "<UP>" ]; then
+					printf "${uprow2}"
+					linenum=2
+				else
+					linenum=4
+				fi
+				;;
 
-		for pNumber in $modPorts
-		do
-			portCount="$((portCount + 1))"
-			if ! _ValidatePortNumber_ "$pNumber" NOLOG
-			then allGood=false
-			fi
-			if _CheckDupPortFound_ "$pNumber" NOLOG
-			then allGood=false
-			fi
+			 4)
+				printf "${dnrow}${clearline}$linehelp4${uprow}"
+		                header="|      Command:"
+		                st="$cmd"
+				editline
+		                [ -n "$st" ] || st="#" #Check for blank output#
+		                cmd="$st"
+
+				if [ $keypress2 == "<UP>" ]; then
+					printf "${uprow2}"
+					linenum=3
+				elif [ $keypress2 == "<DN>" ]; then
+					printf "${uprow}"
+					linenum=4
+				else
+					printf "${clearline}| ${GREENct}Saving parameters...${CLEARct}\n${dnrow}"
+					break
+				fi
+				;;
+			esac
+
 		done
-		if [ "$portCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
-		then
-			allGood=false
-			_LogMsg_ "**ERROR**: INVALID number of ports [$st] found" "$pLogERROR" NOLOG
-		fi
-		if "$allGood"
-		then
-			ports="$st"
-		else
-			errorFound=true
-			printf "Port list [$st] is ${ERRORct}INVALID${CLEARct}. Changes not saved.\n\n"
-		fi
 
-		#Edit interfaces#
-		st="$interfaces"
-		header="Interface(s):"
-		editline
-
-		#Check for blank output
-		[ -n "$st" ] || st="#"
-
-		st="$(_NormalizeCSVList_ "$st")"
-		allGood=true
-		for pIFace in $(echo "$st" | sed 's/,/ /g')
-		do
-			if _CheckInterface_ "$pIFace" NOLOG
-			then continue
-			fi
-			allGood=false  #INACTIVE IFace#
-		done
-		if "$allGood"
-		then
-			interfaces="$st"  #ACTIVE IFace(s)#
-		else
-			errorFound=true
-			printf "Interface list [$st] is ${ERRORct}INVALID${CLEARct}. Changes not saved.\n\n"
-		fi
-
-		#Edit command#
-		st="$cmd"
-		header="     Command:"
-		editline
-
-		#Check for blank output
-		[ -n "$st" ] || st="#"
-
-		cmd="$st"
-		"$errorFound" && return 1 || return 0
+		return 0
 	}
 
 	#Read configuration file into virtual array#
