@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jul-20
+# Last Updated: 2026-Jul-24
 ########################################################################
 
 #Update Log:
@@ -87,10 +87,11 @@
 # - Added clipboard paste capability to editor
 # - Fixed wrong version displayed after update
 # - Ugraded editor to navigatable fields
+# - Screen phase out: Remove option to install screen
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26072316"
+readonly VERS_TAG="Beta_26072417"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -2841,17 +2842,18 @@ then
 	else action="install"
 	fi
 
-	if [ $# -lt 2 ] || [ -z "$2" ] || [ "$2" = "-menu" ]
-	then
-		printf "\nYou have the option to install/use the Entware 'screen' utility.\n"
-		printf "It will replace the built-in background process used by the script.\n"
-		if PromptYN "Would you like to $action the optional Entware 'screen' utility? (y/n):"
-		then useEntwareScreen=true
-		else useEntwareScreen=false
-		fi
-    else
-		useEntwareScreen="$(_GetConfigOption_ USE_EW_SCREEN false)"
-    fi
+	#Phasing out screen, Remove install prompt
+	#if [ $# -lt 2 ] || [ -z "$2" ] || [ "$2" = "-menu" ]
+	#then
+	#	printf "\nYou have the option to install/use the Entware 'screen' utility.\n"
+	#	printf "It will replace the built-in background process used by the script.\n"
+	#	if PromptYN "Would you like to $action the optional Entware 'screen' utility? (y/n):"
+	#	then useEntwareScreen=true
+	#	else useEntwareScreen=false
+	#	fi
+    	#else
+	#	useEntwareScreen="$(_GetConfigOption_ USE_EW_SCREEN false)"
+    	#fi
 
 	if "$useEntwareScreen"
 	then
