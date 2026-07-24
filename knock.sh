@@ -88,10 +88,11 @@
 # - Fixed wrong version displayed after update
 # - Ugraded editor to navigatable fields
 # - Screen phase out: Remove option to install screen
+# - Provided method to direct install develop version
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26072417"
+readonly VERS_TAG="Beta_26072418"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -3065,8 +3066,27 @@ fi
 
 if [ "$1" = "-develop" ]
 then
+	#Making install of develop version easier
+	if [ -d "$INSTALL_DIR" ]; then
+		touch "$developFlag"
+		UpdateScript -force
+		exit 0
+	fi
+	# Check run location #
+	if [ "$(dirname "$scriptFLink")" != "$SCRIPTS_DIR" ]
+	then
+		printf "**ERROR**: This script must be run from ${SCRIPTS_DIR}\n"
+		exit 1
+	fi
+	if [ ! -d "$ADDONS_DIR" ]
+	then
+		printf "\n**ERROR**: This script is designed for Asuswrt-Merlin firmware only\n"
+		exit 1
+	fi
+	mkdir -p "$INSTALL_DIR"
 	touch "$developFlag"
-	UpdateScript -force
+	chmod 755 "$shScriptFile"
+	exec "$shScriptFile"
 	exit 0
 fi
 
