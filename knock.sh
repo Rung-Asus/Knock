@@ -321,7 +321,7 @@ GetKeyPress2()
 		 [6~) keypress2="<PGD>";;
 		 *) keypress2="^[${keypress:1}";;
 		esac;;
-	 [1-7] | 1[0-9] | 2[0-6]) keypress2='^'$(printf "\x$(printf %x $((64+$d)))");;
+	 [1-7] | 1[0-9] | 2[0-6]) keypress2='^'$(printf "\x$(printf %x $((64 + num)))");;
 	 29) keypress2="^]${keypress:1}";;
 	 30) keypress2="^^${keypress:1}";;
 	 31) keypress2="^_${keypress:1}";;
@@ -485,7 +485,7 @@ DoRefresh()
 				DoRefresh
 			fi
 			mr="$(( ${#buf} == $bufsize ? 1 : 0 ))"
-			buf="${st:$offset:$((bufsize-1))}"
+			buf="${st:$offset:$((bufsize - 1))}"
 			echo -n "$keypress2"
 			echo -ne "$savecursor$clearline"
 			echo -n "${buf:$pos}"
@@ -523,7 +523,7 @@ DoRefresh()
 					DoRefresh
 				fi
 				mr=$(( ${#buf} == $bufsize ? 1 : 0 ))
-				buf="${st:$offset:$((bufsize-1))}"
+				buf="${st:$offset:$((bufsize - 1))}"
 				echo -n "${keypress:$i:1}"
 				echo -ne "$savecursor$clearline"
 				echo -n "${buf:$pos}"
@@ -857,7 +857,7 @@ _RemoveCustomFirewallRules_()
     local ruleNumLST  ruleNUM
 
     ruleNumLST="$(iptables -nL INPUT --line-numbers | grep -w "\b${pkCHAIN}\b" | awk '{print $1}' | sort -r)"
-    if [ -n "ruleNumLST" ]
+    if [ -n "$ruleNumLST" ]
     then
         ruleNumLST="$(echo "$ruleNumLST" | tr '\n' ' ' | sed 's/ *$/\n/')"
         for ruleNUM in $ruleNumLST
