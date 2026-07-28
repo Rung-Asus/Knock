@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jul-24
+# Last Updated: 2026-Jul-27
 ########################################################################
 
 #Update Log:
@@ -92,7 +92,7 @@
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26072418"
+readonly VERS_TAG="Beta_26072723"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -167,13 +167,12 @@ readonly servicesStart="${SCRIPTS_DIR}/services-start"
 readonly developFlag="${INSTALL_DIR}/develop"
 readonly cm="\xE2\x9C\x94"
 
-
-#Variables for field editor
-readonly uprow="\e[1A"
+#Variables for built-in field editor#
+readonly uprow1="\e[1A"
 readonly uprow2="\e[2A"
 readonly uprow3="\e[3A"
 readonly uprow4="\e[4A"
-readonly dnrow="\e[1B"
+readonly dnrow1="\e[1B"
 readonly dnrow2="\e[2B"
 readonly dnrow3="\e[3B"
 readonly dnrow4="\e[4B"
@@ -183,8 +182,6 @@ readonly linehelp1g="${wrapoff}| ${GREENct}Enter a comment for this port command
 readonly linehelp2g="${wrapoff}| ${GREENct}Enter the knock port(s) [comma separated]. Use xxxx:U syntax for UDP knocks. ${CLEARct}${wrapon}"
 readonly linehelp3g="${wrapoff}| ${GREENct}Enter the incoming knock interface(s) [comma separated]${CLEARct}${wrapon}"
 readonly linehelp4g="${wrapoff}| ${GREENct}Enter the command to be executed when this knock is received${CLEARct}${wrapon}"
-
-
 
 #To handle ID field from iOS always being ZERO#
 readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
@@ -263,7 +260,8 @@ CleanUp()
 ###############################################
 # Rung's tiny line editor
 #
-function editline {
+editline()
+{
 #
 #Input:
 #	$header = Text in front of edit line
@@ -277,19 +275,22 @@ function editline {
 # characters w/o control charaters (tabs will
 # be converted to spaces)
 
-left="\x08"		#Cursor left 1
-right="\e[C"		#Cursor right 1
-clearline="\e[K"	#Clear line at cursor
-savecursor="\e[s"	#Save current cursor position
-restorecursor="\e[u"	#Restore current cursor position
-startline="\x0d"	#Move to start of line
-rightcursor1="\e["	#Cursor right x (start)
-rightcursor2="C"	#Cursor right x (end)
-moreright="\e[7m>\e[0m"	#Inverse ">"
-moreleft="\e[7m<\e[0m"	#Inverse "<"
+left="\x08"		        #Cursor left 1#
+right="\e[C"		    #Cursor right 1#
+clearline="\e[K"	    #Clear line at cursor#
+savecursor="\e7"	    #Save current cursor position [ANSI standard]#
+restorecursor="\e8"     #Restore current cursor position [ANSI standard]#
+startline="\x0d"	    #Move to start of line#
+rightcursor1="\e["	    #Cursor right x (start)#
+rightcursor2="C"	    #Cursor right x (end)#
+moreright="\e[7m>\e[0m"	#Inverse ">"#
+moreleft="\e[7m<\e[0m"	#Inverse "<"#
 
-
-function keypress2 {
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jul-27] #
+#----------------------------------------#
+GetKeyPress2()
+{
 #Assumes inptut blocking has been disabled ('stty -echo -icanon -icrnl time 0 min 0')
 #Scans keyboard and returns immediately if nothing is pressed
 #
@@ -298,13 +299,13 @@ function keypress2 {
 #	$keypress = raw undecoded key data
 #	$keypress2 = character entered or ascii representation of entered control code (size > 1)
 
-	keypress=$(cat)
-	if  [ ${#keypress} -eq 0 ]; then
-		return 0
+	keypress="$(cat)"
+	if  [ "${#keypress}" -eq 0 ]
+	then return 0
 	fi
+	num="$(printf "%d" "'$keypress")"
 
-	d=$(printf "%d" "'$keypress")
-	case $d in
+	case $num in
 	 9) keypress2="<TAB>";;
 	 13) keypress2="<ENT>";;
 	 27) case ${keypress:1} in
@@ -313,26 +314,30 @@ function keypress2 {
 		 [C) keypress2="<RT>";;
 		 [D) keypress2="<LF>";;
 		 [F) keypress2="<END>";;
-		 [H) keypress2="<HM>";;
+		 [H) keypress2="<HME>";;
 		 [2~) keypress2="<INS>";;
 		 [3~) keypress2="<DEL>";;
 		 [5~) keypress2="<PGU>";;
 		 [6~) keypress2="<PGD>";;
-		 *) keypress2="^["${keypress:1};;
+		 *) keypress2="^[${keypress:1}";;
 		esac;;
-	 [1-8] | 1[0-9] | 2[0-6]) keypress2='^'$(printf "\x$(printf %x $((64+$d)))");;
-	 29) keypress2="^]"${keypress:1};;
-	 30) keypress2="^^"${keypress:1};;
-	 31) keypress2="^_"${keypress:1};;
-	 127) keypress2="<BCK>";;
-	 # Force return of single character
-	 #*) keypress2=$keypress;;
-	 *) keypress2=${keypress:0:1};;
+	 [1-7] | 1[0-9] | 2[0-6]) keypress2='^'$(printf "\x$(printf %x $((64+$d)))");;
+	 29) keypress2="^]${keypress:1}";;
+	 30) keypress2="^^${keypress:1}";;
+	 31) keypress2="^_${keypress:1}";;
+	 8|127) keypress2="<BCK>";;
+	 # Force return of single character #
+	 #*) keypress2="$keypress";;
+	 *) keypress2="${keypress:0:1}";;
  	esac
-	return ${#keypress2}
+	return "${#keypress2}"
 }
 
-function refresh {
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jul-27] #
+#----------------------------------------#
+DoRefresh()
+{
 #Refreshes the current edit line with cursor, header, and "more" arrows
 #Input:
 #	header = string displayed before edit line
@@ -346,7 +351,9 @@ function refresh {
 	buf="${st:$offset:$bufsize}"
 	echo -ne "$startline$clearline"
 	echo -n "$header"
-	if [ "$offset" -eq 0 ]; then
+
+	if [ "$offset" -eq 0 ]
+	then
 		echo -n " "
 	else
 		echo -ne "$moreleft"
@@ -354,132 +361,153 @@ function refresh {
 	echo -ne "$savecursor"
 	echo -n "$buf"
 
-	if [ "$((${#st}-$offset))" -gt "$bufsize" ]; then
+	if [ "$((${#st} - offset))" -gt "$bufsize" ]
+	then
 		echo -ne "$moreright"
 	fi
 	echo -ne "$restorecursor"
-	if [ "$pos" -gt 0 ]; then
+
+	if [ "$pos" -gt 0 ]
+	then
 		echo -ne "$rightcursor1$pos$rightcursor2"
 	fi
 }
 
 #Start of editline function execution
 
- $(stty -echo -icanon -icrnl time 0 min 0)	#Read keyboard without blocking
- st="$(echo "$st" | sed 's/\t/     /')"	#Remove any tabs from input string
- cols=$(stty size | awk '{print $2}') 	#Console width
- bufsize=$((cols-${#header}-10)) 	#Line buffer size
+ $(stty -echo -icanon -icrnl time 0 min 0)  #Read keyboard without blocking
+ st="$(echo "$st" | sed 's/\t/     /')"     #Remove any tabs from input string
+ cols="$(stty size | awk '{print $2}')"     #Console width
+ bufsize="$((cols - ${#header} - 10))"      #Line buffer size
  offset=0 				#Initial offset from edit string to buffer
  pos=0 					#Initial cursor position in buffer
 
- refresh				#display header and edit string
+ DoRefresh				#display header and edit string
 
- while true ; do
- #set +x
-	while true ; do
-		keypress2 || break
+ while true
+ do
+	#DEBUG ONLY# set +x
+
+	while true
+	do GetKeyPress2 || break
 	done
- #set -x
+
+	#DEBUG ONLY# set -x
 
 	case "$keypress2" in
 	 "<ENT>" | "<DN>" | "<UP>")
-		echo ""
+		echo
 		break;;
 	 "<TAB>" | "^[")
 		;;
 	 "<END>")
-		pos=$((${#buf}))
-		if [ $((${#st}-$offset)) -gt $bufsize ]; then
-			offset=$((${#st}-$bufsize))
+		pos="$((${#buf}))"
+		if [ "$((${#st} - offset))" -gt "$bufsize" ]
+		then
+			offset="$((${#st} - bufsize))"
 		fi
-		refresh;;
-	 "<HM>")
+		DoRefresh;;
+	 "<HME>")
 		pos=0
 		offset=0
-		refresh;;
+		DoRefresh;;
 	 "<RT>")
-		if [ $pos -eq $bufsize ]; then
-			offset=$((offset + 1))
-			pos=$((pos - 1))
-			refresh
+		if [ "$pos" -eq "$bufsize" ]
+		then
+			offset="$((offset + 1))"
+			pos="$((pos - 1))"
+			DoRefresh
 		fi
-		if [ $pos -lt ${#buf} ]; then
-			echo -ne $right
-			pos=$((pos+1))
+		if [ "$pos" -lt "${#buf}" ]
+		then
+			echo -ne "$right"
+			pos="$((pos + 1))"
 		fi;;
 	 "<LF>")
-		if [ $pos -gt 0 ]; then
-			echo -ne $left
-			pos=$((pos-1))
-		elif [ $offset -ne 0 ]; then
-			offset=$((offset - 1))
-			refresh
+		if [ "$pos" -gt 0 ]
+		then
+			echo -ne "$left"
+			pos="$((pos - 1))"
+		elif [ "$offset" -ne 0 ]
+		then
+			offset="$((offset - 1))"
+			DoRefresh
 		fi;;
 	 "<DEL>")
-		if [ $pos -eq $bufsize ]; then
-			offset=$((offset + 1))
-			pos=$((pos - 1))
-			refresh
+		if [ $pos -eq $bufsize ]
+		then
+			offset="$((offset + 1))"
+			pos="$((pos - 1))"
+			DoRefresh
 		fi
-		if [ $pos -lt ${#buf} ]; then
+		if [ "$pos" -lt "${#buf}" ]
+		then
 			buf="${st:$offset:$((bufsize+1))}"
-			echo -ne $savecursor$clearline
+			echo -ne "$savecursor$clearline"
 			echo -n "${buf:$((pos+1))}"
 			st="${st:0:$((offset+pos))}""${st:$((offset+pos+1))}"
 			buf="${st:$offset:$bufsize}"
-			if [ $((${#st}-$offset)) -gt $bufsize ]; then
+			if [ "$((${#st} - offset))" -gt "$bufsize" ]
+			then
 				echo -ne $moreright
 			fi
-			echo -ne $restorecursor
+			echo -ne "$restorecursor"
 		fi;;
 	 "<BCK>")
-		if [ $pos -eq 0 ] && [ $offset -ne 0 ]; then
-			offset=$((offset - 1))
+		if [ $pos -eq 0 ] && [ $offset -ne 0 ]
+		then
+			offset="$((offset - 1))"
 			pos=1
-			refresh
+			DoRefresh
 		fi
-		if [ $pos -gt 0 ]; then
+		if [ "$pos" -gt 0 ]
+		then
 			buf="${st:$offset:$((bufsize+1))}"
-			echo -ne $left$savecursor$clearline
+			echo -ne "$left$savecursor$clearline"
 			echo -n "${buf:$pos}"
 			st="${st:0:$((offset+pos-1))}""${st:$((offset+pos))}"
 			buf="${st:$offset:$bufsize}"
-			pos=$((pos-1))
-			if [ $((${#st}-$offset)) -gt $bufsize ]; then
-				echo -ne $moreright
+			pos="$((pos - 1))"
+			if [ "$((${#st} - offset))" -gt "$bufsize" ]
+			then
+				echo -ne "$moreright"
 			fi
-			echo -ne $restorecursor
+			echo -ne "$restorecursor"
 		fi;;
 	 *)
-		if [ ${#keypress} -eq 1 ]; then
-			keypress2=${keypress2:0:1}
-			if [ $pos -eq $bufsize ]; then
-				offset=$((offset + 1))
-				pos=$((pos - 1))
-				refresh
+		if [ "${#keypress}" -eq 1 ]
+		then
+			keypress2="${keypress2:0:1}"
+			if [ "$pos" -eq "$bufsize" ]
+			then
+				offset="$((offset + 1))"
+				pos="$((pos - 1))"
+				DoRefresh
 			fi
-			mr=$(( ${#buf} == $bufsize ? 1 : 0 ))
+			mr="$(( ${#buf} == $bufsize ? 1 : 0 ))"
 			buf="${st:$offset:$((bufsize-1))}"
 			echo -n "$keypress2"
-			echo -ne $savecursor$clearline
+			echo -ne "$savecursor$clearline"
 			echo -n "${buf:$pos}"
 			if [ $mr -eq 1 ]; then
-				echo -ne $moreright
+				echo -ne "$moreright"
 			fi
-			echo -ne $restorecursor
+			echo -ne "$restorecursor"
 			st="${st:0:$((offset+pos))}""$keypress2""${st:$((offset+pos))}"
 			buf="${st:$offset:$bufsize}"
-			pos=$((pos+1))
+			pos="$((pos + 1))"
 
 		#handle multicharacter paste
-		elif [ ${#keypress} -gt 1 ]; then
+		elif [ "${#keypress}" -gt 1 ]
+		then
 			i=0
 			#iterate the paste sequence like a keyboard entry
-			while [ $i -lt ${#keypress} ]; do
+			while [ "$i" -lt "${#keypress}" ]
+			do
 				#Filter out unhandled control chars and escape sequences
-				d=$(printf "%d" "'${keypress:$i:1}")
-				case $d in
-				 9 | 13) i=$(($i+1))
+				num="$(printf "%d" "'${keypress:$i:1}")"
+				case $num in
+				 9 | 13) i="$((i + 1))"
 					continue;;
 
 				 [1-8] | 1[0-9] | 2[0-7])
@@ -488,24 +516,25 @@ function refresh {
 					break;;
 				esac
 
-				if [ $pos -eq $bufsize ]; then
-					offset=$((offset + 1))
-					pos=$((pos - 1))
-					refresh
+				if [ "$pos" -eq "$bufsize" ]
+				then
+					offset="$((offset + 1))"
+					pos="$((pos - 1))"
+					DoRefresh
 				fi
 				mr=$(( ${#buf} == $bufsize ? 1 : 0 ))
 				buf="${st:$offset:$((bufsize-1))}"
 				echo -n "${keypress:$i:1}"
-				echo -ne $savecursor$clearline
+				echo -ne "$savecursor$clearline"
 				echo -n "${buf:$pos}"
 				if [ $mr -eq 1 ]; then
-					echo -ne $moreright
+					echo -ne "$moreright"
 				fi
-				echo -ne $restorecursor
+				echo -ne "$restorecursor"
 				st="${st:0:$((offset+pos))}""${keypress:$i:1}""${st:$((offset+pos))}"
 				buf="${st:$offset:$bufsize}"
-				pos=$((pos+1))
-				i=$(($i+1))
+				pos="$((pos + 1))"
+				i="$((i + 1))"
 			done
 		fi;;
 	esac
@@ -939,6 +968,14 @@ _CheckConfigurationFile_()
             continue
         fi
 
+        if echo "$theCMDx" | grep -qE "^[[:blank:]]*[#].*"
+        then
+            errorFound=true
+            "$isVerboseMode" && \
+            _LogMsg_ "**ERROR**: The port knock command [$theCMDx] is INVALID" "$pLogERROR"
+            continue
+        fi
+
         thePORTx="$(_NormalizeCSVList_ "$thePORTx")"
         theIFACE="$(_NormalizeCSVList_ "$theIFACE")"
         portIFacesLst="$(echo "$theIFACE" | tr ',' ' ')"
@@ -1033,7 +1070,8 @@ _CreateCustomFirewallRules_()
 		theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
 		theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
 
-		if [ -z "$thePORTS" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
+		if [ -z "$thePORTS" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ] || \
+		   echo "$theCMDx" | grep -qE "^[[:blank:]]*[#].*"
 		then continue  #INVALID#
 		fi
 
@@ -1138,7 +1176,8 @@ CheckFirewall()
 		theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
 		theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
 
-		if [ -z "$thePORTS" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
+		if [ -z "$thePORTS" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ] || \
+		   echo "$theCMDx" | grep -qE "^[[:blank:]]*[#].*"
 		then continue  #INVALID#
 		fi
 
@@ -1321,7 +1360,7 @@ UpdateScript()
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-06] #
+# Modified by Martinski W. [2026-Jul-27] #
 #----------------------------------------#
 EditPortKnockConfig()
 {
@@ -1363,78 +1402,80 @@ EditPortKnockConfig()
 		done
 	}
 
-     EditPortKnockEntry()
-        {
+	EditPortKnockEntry()
+	{
 
 		local linehelp1=$linehelp1g
 		local linehelp2=$linehelp2g
 		local linehelp3=$linehelp3g
 		local linehelp4=$linehelp4g
-
-                local pNumber  pIFace  allGood  portCount
+		local pNumber  pIFace  allGood  portCount
 		local linenum=1
 
-		local cols=$(stty size | awk '{print $2}')   #Console width#
+		local cols="$(stty size | awk '{print $2}')"   #Console width#
 		local dashes="+$(head -c "$((cols-1))" </dev/zero | tr '\0' '-')"
 
 		#Initial help#
 		printf "\nEnter knock parameters below. Navigate w/ <UP> and <DN>, <SHIFT><INS> for clipboard paste, <ENT> when done.\n$dashes\n"
-		printf "|\n|\n|\n|\n\n\n${uprow}${dashes}\r${uprow4}${uprow}" #Draw lower bounding box#
+		printf "|\n|\n|\n|\n\n\n${uprow1}${dashes}\r${uprow4}${uprow1}" #Draw lower bounding box#
 
-		while true ; do
+		while true
+		do
 			case $linenum in
 			 1)
 				printf "${dnrow4}${clearline}$linehelp1${uprow4}"
-		                header="|      Comment:"
-		                st="$comment"
+				header="|      Comment:"
+				st="$comment"
 				editline
-		                [ -n "$st" ] || st="#" #Check for blank output#
-		                comment="$st"
-				if [ $keypress2 == "<UP>" ]; then
-					printf "${uprow}"
+				[ -z "$st" ] && st="#"  #Check for blank output#
+				comment="$st"
+				if [ "$keypress2" = "<UP>" ]
+				then
+					printf "${uprow1}"
 				else
 					linenum=2
 				fi
 				;;
 			 2)
 				printf "${dnrow3}${clearline}$linehelp2${uprow3}"
-		                header="|      Port(s):"
-		                st="$ports"
+				header="|      Port(s):"
+				st="$ports"
 				editline
-		                [ -n "$st" ] || st="#" #Check for blank output#
-		                st="$(_NormalizeCSVList_ "$st")"
-		                st="$(echo "$st" | tr 'udtcp' 'UDTCP')" #Capitaliize protocol letters#
-		                allGood=true
-		                portCount=0
-		                modPorts="$(echo "$st" | sed 's/,/ /g')"
-		                _AddModPortsToFullList_ "$ports" "$modPorts"
-		                for pNumber in $modPorts
-		                do
-		                        portCount="$((portCount + 1))"
-		                        if ! _ValidatePortNumber_ "$pNumber" silent
-		                        then allGood=false
-		                        fi
-		                        if _CheckDupPortFound_ "$pNumber" silent
-		                        then allGood=false
-		                        fi
-		                done
-		                if [ "$portCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
-		                then
+				[ -z "$st" ] && st="#"  #Check for blank output#
+				st="$(_NormalizeCSVList_ "$st")"
+				st="$(echo "$st" | tr 'udtcp' 'UDTCP')" #Capitaliize protocol letters#
+				allGood=true
+				portCount=0
+				modPorts="$(echo "$st" | sed 's/,/ /g')"
+				_AddModPortsToFullList_ "$ports" "$modPorts"
+				for pNumber in $modPorts
+				do
+					portCount="$((portCount + 1))"
+					if ! _ValidatePortNumber_ "$pNumber" silent
+					then allGood=false
+					fi
+					if _CheckDupPortFound_ "$pNumber" silent
+					then allGood=false
+					fi
+				done
+				if [ "$portCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
+				then
 					linehelp2="${wrapoff}| ${REDct}**ERROR**: INVALID number of ports [$st] found. Try again!${CLEARct}${wrapon}"
-					printf "${uprow}"
+					printf "${uprow1}"
 					continue
-		                fi
-		                if "$allGood"
-		                then
-					linehelp2=$linehelp2g
-		                        ports="$st"
-		                else
+				fi
+				if "$allGood"
+				then
+					linehelp2="$linehelp2g"
+					ports="$st"
+				else
 					linehelp2="${wrapoff}| ${REDct}Port list [$st] is ${ERRORct}INVALID. Try again!${CLEARct}${wrapon}"
-					printf "${uprow}"
+					printf "${uprow1}"
 					continue
-		                fi
+				fi
 
-				if [ $keypress2 == "<UP>" ]; then
+				if [ "$keypress2" = "<UP>" ]
+				then
 					printf "${uprow2}"
 					linenum=1
 				else
@@ -1444,30 +1485,31 @@ EditPortKnockConfig()
 
 			 3)
 				printf "${dnrow2}${clearline}$linehelp3${uprow2}"
-		                header="| Interface(s):"
-		                st="$interfaces"
+				header="| Interface(s):"
+				st="$interfaces"
 				editline
-		                [ -n "$st" ] || st="#" #Check for blank output
-		                st="$(_NormalizeCSVList_ "$st")"
-		                allGood=true
-		                for pIFace in $(echo "$st" | sed 's/,/ /g')
-		                do
-		                        if _CheckInterface_ "$pIFace" silent
-		                        then continue
-		                        fi
-		                        allGood=false  #INACTIVE IFace#
-		                done
-		                if "$allGood"
-		                then
-					linehelp3=$linehelp3g
-		                        interfaces="$st"  #ACTIVE IFace(s)#
-		                else
+				[ -z "$st" ] && st="#"  #Check for blank output#
+				st="$(_NormalizeCSVList_ "$st")"
+				allGood=true
+				for pIFace in $(echo "$st" | sed 's/,/ /g')
+				do
+					if _CheckInterface_ "$pIFace" silent
+					then continue
+					fi
+					allGood=false  #INACTIVE IFace#
+				done
+				if "$allGood"
+				then
+					linehelp3="$linehelp3g"
+					interfaces="$st"  #ACTIVE IFace(s)#
+				else
 					linehelp3="${wrapoff}| ${REDct}Interface list [$st] is ${ERRORct}INVALID. Try again!${CLEARct}${wrapon}"
-					printf "${uprow}"
+					printf "${uprow1}"
 					continue
-		                fi
+				fi
 
-				if [ $keypress2 == "<UP>" ]; then
+				if [ "$keypress2" = "<UP>" ]
+				then
 					printf "${uprow2}"
 					linenum=2
 				else
@@ -1476,21 +1518,36 @@ EditPortKnockConfig()
 				;;
 
 			 4)
-				printf "${dnrow}${clearline}$linehelp4${uprow}"
-		                header="|      Command:"
-		                st="$cmd"
+				printf "${dnrow1}${clearline}$linehelp4${uprow1}"
+				header="|      Command:"
+				st="$cmd"
 				editline
-		                [ -n "$st" ] || st="#" #Check for blank output#
-		                cmd="$st"
+				[ -z "$st" ] && st="#"  #Check for blank output#
+				allGood=true
+				if [ -z "$st" ] || echo "$st" | grep -qE "^[[:blank:]]*[#].*"
+				then
+					allGood=false
+				fi
+				if "$allGood"
+				then
+					linehelp4="$linehelp4g"
+					cmd="$st"
+				else
+					linehelp4="${wrapoff}| ${REDct}Command [$st] is ${ERRORct}INVALID. Try again!${CLEARct}${wrapon}"
+					printf "${uprow1}"
+					continue
+				fi
 
-				if [ $keypress2 == "<UP>" ]; then
+				if [ "$keypress2" = "<UP>" ]
+				then
 					printf "${uprow2}"
 					linenum=3
-				elif [ $keypress2 == "<DN>" ]; then
-					printf "${uprow}"
+				elif [ $keypress2 = "<DN>" ]
+				then
+					printf "${uprow1}"
 					linenum=4
 				else
-					printf "${clearline}| ${GREENct}Saving parameters...${CLEARct}\n${dnrow}"
+					printf "${clearline}| ${GREENct}Saving parameters...${CLEARct}\n${dnrow1}"
 					break
 				fi
 				;;
@@ -1571,7 +1628,7 @@ EditPortKnockConfig()
 				portIFacesLst="$(echo "$IFaces" | tr ',' ' ')"
 				portNumSeqLst="$(echo "$kPorts" | tr ',' ' ')"
 				portListCount="$(echo "$kPorts" | awk -F',' '{print NF}')"
-				activeIFaceOK=true ; portNumOK=true
+				activeIFaceOK=true ; portNumOK=true ; theCmdOK=true
 
 				for pIFace in $portIFacesLst
 				do
@@ -1596,7 +1653,14 @@ EditPortKnockConfig()
 					_LogMsg_ "**ERROR**: INVALID number of ports [$kPorts] found" "$pLogERROR" NOLOG
 				fi
 
-				if [ "$portNumOK" = "false" ] || \
+				if [ -z "$theCMD" ] || echo "$theCMD" | grep -qE "^[[:blank:]]*[#].*"
+				then
+					theCmdOK=false
+					_LogMsg_ "**ERROR**: INVALID command [$theCMD] found" "$pLogERROR" NOLOG
+				fi
+
+				if [ "$theCmdOK" = "false" ] || \
+				   [ "$portNumOK" = "false" ] || \
 				   [ "$activeIFaceOK" = "false" ]
 				then
 					_LogMsg_ "**ERROR**: The port knock entry is INVALID" "$pLogERROR" NOLOG
@@ -3056,8 +3120,7 @@ then
 	_RemoveCustomFirewallRules_ ALL
 	service restart_firewall >/dev/null
 
-	echo
-	echo "Knock.sh is uninstalled"
+	printf "\nKnock.sh is uninstalled\n"
 	[ -s "$savedConfig" ] && \
 	echo "Existing configuration file saved as $savedConfig"
 	echo "Thanks for using ${shScriptName}!"
@@ -3066,8 +3129,9 @@ fi
 
 if [ "$1" = "-develop" ]
 then
-	#Making install of develop version easier
-	if [ -d "$INSTALL_DIR" ]; then
+	#Making install of develop version easier#
+	if [ -d "$INSTALL_DIR" ]
+	then
 		touch "$developFlag"
 		UpdateScript -force
 		exit 0
@@ -3093,7 +3157,6 @@ fi
 if [ "$1" = "-main" ] || [ "$1" = "-stable" ]
 then
 	rm -f "$developFlag" 2>/dev/null
-
 	UpdateScript -force
 	exit 0
 fi
@@ -3273,15 +3336,15 @@ if ! "$useEntwareScreen"
 then trap '' HUP
 fi
 
-renice 5 $$
+renice 10 $$
 rm -f "$knockLoopDaemonSEM"
 
 isDEBUG=false
 portNumOK=false
 thePortNum=""
 srceIPaddr=""
-sleepINTERVAL=3
 portListCount=0
+sleepINTERVAL=3
 
 knockWaitNUM=0
 knockWaitMAX=60
@@ -3344,7 +3407,8 @@ do
         theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
         theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
 
-        if [ -z "$thePORTx" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
+        if [ -z "$thePORTx" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ] || \
+           echo "$theCMDx" | grep -qE "^[[:blank:]]*[#].*"
         then continue  #INVALID#
         fi
 
