@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jul-27
+# Last Updated: 2026-Jul-28
 ########################################################################
 
 #Update Log:
@@ -92,7 +92,7 @@
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26072723"
+readonly VERS_TAG="Beta_26072800"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -275,19 +275,19 @@ editline()
 # characters w/o control charaters (tabs will
 # be converted to spaces)
 
-left="\x08"		        #Cursor left 1#
-right="\e[C"		    #Cursor right 1#
-clearline="\e[K"	    #Clear line at cursor#
-savecursor="\e7"	    #Save current cursor position [ANSI standard]#
-restorecursor="\e8"     #Restore current cursor position [ANSI standard]#
-startline="\x0d"	    #Move to start of line#
-rightcursor1="\e["	    #Cursor right x (start)#
-rightcursor2="C"	    #Cursor right x (end)#
-moreright="\e[7m>\e[0m"	#Inverse ">"#
-moreleft="\e[7m<\e[0m"	#Inverse "<"#
+left="\x08"              #Cursor left 1#
+right="\e[C"             #Cursor right 1#
+clearline="\e[K"         #Clear line at cursor#
+savecursor="\e7"         #Save current cursor position [ANSI standard]#
+restorecursor="\e8"      #Restore current cursor position [ANSI standard]#
+startline="\x0d"         #Move to start of line#
+rightcursor1="\e["       #Cursor right x (start)#
+rightcursor2="C"         #Cursor right x (end)#
+moreright="\e[7m>\e[0m"  #Inverse ">"#
+moreleft="\e[7m<\e[0m"   #Inverse "<"#
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jul-27] #
+# Modified by Martinski W. [2026-Jul-28] #
 #----------------------------------------#
 GetKeyPress2()
 {
@@ -313,8 +313,8 @@ GetKeyPress2()
 		 [B) keypress2="<DN>";;
 		 [C) keypress2="<RT>";;
 		 [D) keypress2="<LF>";;
-		 [F) keypress2="<END>";;
-		 [H) keypress2="<HME>";;
+		 [F|[4~) keypress2="<END>";;
+		 [H|[1~) keypress2="<HME>";;
 		 [2~) keypress2="<INS>";;
 		 [3~) keypress2="<DEL>";;
 		 [5~) keypress2="<PGU>";;
