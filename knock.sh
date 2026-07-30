@@ -92,7 +92,7 @@
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26073001"
+readonly VERS_TAG="Beta_26073020"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -3268,6 +3268,7 @@ then
 	rm -f "$configFPath"
 	rm -f "$optConfFile"
 	rm -f "$shScriptFile"
+	rm -f "$logKnockFPath"
 
 	#Attempt to remove installation directory#
 	if [ "$(pwd)" = "$INSTALL_DIR" ]
