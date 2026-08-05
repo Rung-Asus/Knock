@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jul-30
+# Last Updated: 2026-Aug-5
 ########################################################################
 
 #Update Log:
@@ -89,10 +89,11 @@
 # - Ugraded editor to navigatable fields
 # - Screen phase out: Remove option to install screen
 # - Provided method to direct install develop version
+# - Trying Skynet fix from @Reef2009
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26073020"
+readonly VERS_TAG="Beta_26080519"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -3412,6 +3413,13 @@ Read_dmesgDATA()
 	local IFACE  SRCIP  MSGID  DPORT  PROTO  knockMSG  tempMSG
 
 	knockMSG="$(dmesg | grep -E "^${shScriptName}[[:blank:]]+" | tail -n1)"
+
+	#Suggested Skynet fix by @Reef2009
+	if [ -z "$knockMSG" ]
+	then
+		knockMSG="$(grep -E "${shScriptName} IN=" /tmp/syslog.log | tail -n1 | sed 's/.*kernel: //')"
+	fi
+
 	if [ -z "$knockMSG" ] ; then echo ; return 1 ; fi
 	tempMSG="$(echo "$knockMSG" | awk -v RS=' ' '{print}')"
 
