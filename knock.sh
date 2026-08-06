@@ -93,7 +93,7 @@
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26080608"
+readonly VERS_TAG="Beta_26080610"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -3476,6 +3476,7 @@ then
 		_LogMsg_ "$logMsg" "$pLogERROR" ; _LogKnock_ "$logMsg"
 		exit 1
 	fi
+	trap '' HUP
 	_Read_dmesgToKnockLogFile_ "$2"
 	exit "$?"
 fi
