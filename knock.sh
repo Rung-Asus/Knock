@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Aug-5
+# Last Updated: 2026-Aug-06
 ########################################################################
 
 #Update Log:
@@ -89,11 +89,11 @@
 # - Ugraded editor to navigatable fields
 # - Screen phase out: Remove option to install screen
 # - Provided method to direct install develop version
-# - Trying Skynet fix from @Reef2009
+# - Fixed issue with Skynet flooding the dmesg buffer with unsolicited WAN traffic entries.
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26080519"
+readonly VERS_TAG="Beta_26080608"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -173,7 +173,7 @@ readonly cm="\xE2\x9C\x94"
 logKnockEnabled=false
 readonly logKnockFName="portKnock_DEBUG.LOG"
 readonly logKnockFPath="${INSTALL_DIR}/$logKnockFName"
-readonly logKnockSizeMAX=32768  #32KB or 64KB=65536?#
+readonly logKnockSizeMAX=32768  #32KB or 64KB=65536#
 readonly logKnockTimeStamp="%Y-%b-%d %H:%M:%S"
 
 #Variables for built-in field editor#
@@ -196,6 +196,12 @@ readonly linehelp4g="${wrapoff}| ${GREENct}Enter the command to be executed when
 #To handle ID field from iOS always being ZERO#
 readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
 readonly FAKE_KMESG="$shScriptName IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID=$FAKE_NUMID PROTO="
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Aug-06] #
+#-------------------------------------#
+readonly dmesgKnockLinesMAX=100
+readonly dmesgKnockLogFILE="${TEMP_DIR}/knock_dmesg.LOG"
 
 if [ ! -f "$developFlag" ]
 then
@@ -957,15 +963,16 @@ _CheckBackgroundProcess_()
 {
 	if "$useEntwareScreen"
 	then
-		if ! /opt/sbin/screen -ls knock >/dev/null
-		then return 1
+		if /opt/sbin/screen -ls knock >/dev/null
+		then return 0
 		fi
 	else
-		if ! top -bn1 | grep -qE "[/]$shScriptName -loop"
-		then return 1
+		if top -bn1 | grep -qE "[/]$shScriptName -loop" && \
+		   top -bn1 | grep -qE "[/]$shScriptName -dmesgLog"
+		then return 0
 		fi
 	fi
-	return 0
+	return 1
 }
 
 #----------------------------------------#
@@ -1987,6 +1994,25 @@ _ReleaseMutexFLock_()
 	knockMutexFLock_OK=false
 }
 
+_ValidateMutexFLock_()
+{
+    if [ ! -s "$knockMutexFLock_FN" ]
+    then return 1
+    fi
+    local procInfo  procName  procIDno  procIDof=""
+
+    procInfo="$(head -n1 "$knockMutexFLock_FN")"
+    procName="$(echo "$procInfo" | cut -d'|' -f1)"
+    procIDno="$(echo "$procInfo" | cut -d'|' -f2)"
+    if [ -n "$procName" ] && [ -n "$procIDno" ]
+    then procIDof="$(pidof "$procName")"
+    fi
+    if [ -z "$procIDof" ] || [ "$procIDno" -ne "$1" ]
+    then return 1
+    fi
+    return 0
+}
+
 _AcquireMutexFLock_()
 {
     local retCode  procInfo  procName  procIDno  procIDof=""
@@ -2214,7 +2240,8 @@ _StartBackground_ScreenProcess_()
 	while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
 	do
 		sleep 1
-		if /opt/sbin/screen -ls knock >/dev/null
+		if /opt/sbin/screen -ls knock >/dev/null && \
+		   top -bn1 | grep -qE "[/]$shScriptName -dmesgLog"
 		then break
 		fi
 	done
@@ -2287,7 +2314,8 @@ _StartBackground_DaemonProcess_()
 	while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
 	do
 		sleep 1
-		if top -bn1 | grep -qE "[/]$shScriptName -loop"
+		if top -bn1 | grep -qE "[/]$shScriptName -loop" && \
+		   top -bn1 | grep -qE "[/]$shScriptName -dmesgLog"
 		then break
 		fi
 	done
@@ -2313,13 +2341,15 @@ _StopBackground_DaemonProcess_()
 	while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
 	do
 		sleep 1
-		if top -bn1 | grep -qE "[/]$shScriptName -loop"
+		if top -bn1 | grep -qE "[/]$shScriptName -loop" || \
+		   top -bn1 | grep -qE "[/]$shScriptName -dmesgLog"
 		then continue
 		fi
 		break
 	done
 
-	if top -bn1 | grep -qE "[/]$shScriptName -loop"
+	if top -bn1 | grep -qE "[/]$shScriptName -loop" || \
+	   top -bn1 | grep -qE "[/]$shScriptName -dmesgLog"
 	then return 1
 	else return 0
 	fi
@@ -2330,7 +2360,8 @@ _StopBackground_DaemonProcess_()
 #-------------------------------------#
 _CheckAndStopBackground_DaemonProcess_()
 {
-	if top -bn1 | grep -qE "[/]$shScriptName -loop"
+	if top -bn1 | grep -qE "[/]$shScriptName -loop" || \
+	   top -bn1 | grep -qE "[/]$shScriptName -dmesgLog"
 	then
 		{ [ $# -eq 0 ] || [ -z "$1" ] ; } && \
 		printf "An existing background process must be stopped first. Please wait...\n"
@@ -2391,7 +2422,7 @@ _StartBackgroundProcess_()
 		fi
 	else
 		echo
-		logMsg="ERROR: Cannot start $shScriptName background process"
+		logMsg="**ERROR**: Cannot start $shScriptName background process"
 		_LogMsg_ "$logMsg" "$pLogERROR" ; _LogKnock_ "$logMsg"
 		echo
 		return 1
@@ -2427,7 +2458,7 @@ _StopBackgroundProcess_()
 		return 0
 	else
 		echo
-		logMsg="ERROR: The $shScriptName background process was NOT stopped"
+		logMsg="**ERROR**: The $shScriptName background process was NOT stopped"
 		_LogMsg_ "$logMsg" "$pLogERROR" ; _LogKnock_ "$logMsg"
 		echo
 		return 1
@@ -2705,6 +2736,72 @@ then
 	printf "\nThanks for using ${shScriptName}!\n\n"
 	exit
 fi
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Aug-06] #
+#-------------------------------------#
+_Check_dmesgKnockLogFileSize_()
+{
+	if [ ! -s "$dmesgKnockLogFILE" ]
+	then return 0
+	fi
+	local numLines  msgLAST
+	numLines="$(wc -l < "$dmesgKnockLogFILE")"
+
+	if [ "$numLines" -gt "$dmesgKnockLinesMAX" ]
+	then  #Keep 2 entries as previous context#
+		msgLAST="$(tail -n2 "$dmesgKnockLogFILE")"
+		echo "$msgLAST" > "$dmesgKnockLogFILE"
+		echo 
+	fi
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Aug-06] #
+#-------------------------------------#
+_Read_dmesgToKnockLogFile_()
+{
+	local knockMSG  logMsg  waitUSleep=100000
+	local checkCount=20  sleepCount=0  LASTmsg
+
+	if ! _ValidateMutexFLock_ "$1"
+	then
+		logMsg="**ERROR**: INVALID Mutex Lock Found."
+		_LogMsg_ "$logMsg" "$pLogERROR" ; _LogKnock_ "$logMsg"
+		return 1
+	fi
+
+	if [ ! -s "$dmesgKnockLogFILE" ]
+	then LASTmsg=""
+	else LASTmsg="$(tail -n1 "$dmesgKnockLogFILE")"
+	fi
+
+	while true
+	do
+		knockMSG="$(dmesg | grep -E "^${shScriptName}[[:blank:]]+" | tail -n1)"
+		if [ -n "$knockMSG" ] && [ "$knockMSG" != "$LASTmsg" ]
+		then
+			echo "$knockMSG" >> "$dmesgKnockLogFILE"
+			LASTmsg="$knockMSG"
+		fi
+		usleep "$waitUSleep"
+		sleepCount="$((sleepCount + 1))"
+
+		if [ "$((sleepCount % checkCount))" -eq 0 ]
+		then
+			sleepCount=0
+			if [ -f "$knockLoopDaemonSEM" ]
+			then
+				logMsg="Exiting $shScriptName dmesg log daemon"
+				_LogMsg_ "$logMsg" ; _LogKnock_ "$logMsg"
+				break
+			fi
+            _Check_dmesgKnockLogFileSize_
+		fi
+	done
+
+	return 0
+}
 
 #-------------------------------------#
 # Added by Martinski W. [2026-Jun-06] #
@@ -3270,6 +3367,7 @@ then
 	rm -f "$optConfFile"
 	rm -f "$shScriptFile"
 	rm -f "$logKnockFPath"
+	rm -f "$dmesgKnockLogFILE"
 
 	#Attempt to remove installation directory#
 	if [ "$(pwd)" = "$INSTALL_DIR" ]
@@ -3366,6 +3464,22 @@ then
 	exit
 fi
 
+#-------------------------------------#
+# Added by Martinski W. [2026-Aug-06] #
+#-------------------------------------#
+if [ "$1" = "-dmesgLog" ]
+then
+	if [ $# -lt 2 ] || [ -z "$2" ] || \
+	   ! echo "$2" | grep -qE '^[0-9]+$'
+	then
+		logMsg="**ERROR**: No parameter for 'dmesgLog' process"
+		_LogMsg_ "$logMsg" "$pLogERROR" ; _LogKnock_ "$logMsg"
+		exit 1
+	fi
+	_Read_dmesgToKnockLogFile_ "$2"
+	exit "$?"
+fi
+
 if [ "$1" != "-loop" ]
 then
 	echo "Knock.sh: Router Commands for non-admin users"
@@ -3406,20 +3520,13 @@ then
 fi
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-May-31] #
+# Modified by Martinski W. [2026-Aug-06] #
 #----------------------------------------#
 Read_dmesgDATA()
 {
 	local IFACE  SRCIP  MSGID  DPORT  PROTO  knockMSG  tempMSG
 
-	knockMSG="$(dmesg | grep -E "^${shScriptName}[[:blank:]]+" | tail -n1)"
-
-	#Suggested Skynet fix by @Reef2009
-	if [ -z "$knockMSG" ]
-	then
-		knockMSG="$(grep -E "${shScriptName} IN=" /tmp/syslog.log | tail -n1 | sed 's/.*kernel: //')"
-	fi
-
+	knockMSG="$(grep -E "^${shScriptName}[[:blank:]]+" "$dmesgKnockLogFILE" | tail -n1)"
 	if [ -z "$knockMSG" ] ; then echo ; return 1 ; fi
 	tempMSG="$(echo "$knockMSG" | awk -v RS=' ' '{print}')"
 
@@ -3501,8 +3608,13 @@ if ! "$useEntwareScreen"
 then trap '' HUP
 fi
 
-renice 10 $$
 rm -f "$knockLoopDaemonSEM"
+
+if [ ! -f "$dmesgKnockLogFILE" ]
+then printf '' > "$dmesgKnockLogFILE"
+fi
+
+nohup "$shScriptFile" -dmesgLog "$$" >/dev/null &
 
 isDEBUG=false
 portNumOK=false
@@ -3530,6 +3642,8 @@ logKnockEnabled="$(_GetConfigOption_ LOG_KNOCK_ENABLE false)"
 
 logMsg="Waiting for port knocks ${versionStr_TAG}..."
 _LogMsg_ "$logMsg" "$pLogWARNG" ; _LogKnock_ "$logMsg"
+
+renice 10 $$
 
 #----------------------------------------#
 # Modified by Martinski W. [2026-Jul-30] #
