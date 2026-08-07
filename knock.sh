@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Aug-06
+# Last Updated: 2026-Aug-07
 ########################################################################
 
 #Update Log:
@@ -93,7 +93,7 @@
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26080610"
+readonly VERS_TAG="Beta_26080700"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -2740,6 +2740,22 @@ fi
 #-------------------------------------#
 # Added by Martinski W. [2026-Aug-06] #
 #-------------------------------------#
+_CheckSkynetInstalled_()
+{
+	local SkynetScript="${SCRIPTS_DIR}/firewall"
+
+	if [ ! -s "$SkynetScript" ] || [ ! -s "$firewallStart" ]
+	then return 1
+	fi
+	if grep -qE "$SkynetScript .* skynetloc=.*/skynet (& )?# Skynet" "$firewallStart"
+	then return 0
+	else return 1
+	fi
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Aug-06] #
+#-------------------------------------#
 _Check_dmesgKnockLogFileSize_()
 {
 	if [ ! -s "$dmesgKnockLogFILE" ]
@@ -2761,8 +2777,8 @@ _Check_dmesgKnockLogFileSize_()
 #-------------------------------------#
 _Read_dmesgToKnockLogFile_()
 {
-	local knockMSG  logMsg  waitUSleep=100000
-	local checkCount=20  sleepCount=0  LASTmsg
+	local knockMSG  logMsg  waitUSleep
+	local checkCount  sleepCount  LASTmsg
 
 	if ! _ValidateMutexFLock_ "$1"
 	then
@@ -2770,6 +2786,18 @@ _Read_dmesgToKnockLogFile_()
 		_LogMsg_ "$logMsg" "$pLogERROR" ; _LogKnock_ "$logMsg"
 		return 1
 	fi
+
+	if _CheckSkynetInstalled_
+	then
+		checkCount=10
+		waitUSleep=200000
+		logMsg="Skynet add-on was found installed"
+		_LogMsg_ "$logMsg" "$pLogWARNG" ; _LogKnock_ "$logMsg"
+	else
+		checkCount=2
+		waitUSleep=1000000
+	fi
+	sleepCount=0
 
 	if [ ! -s "$dmesgKnockLogFILE" ]
 	then LASTmsg=""
@@ -2793,7 +2821,7 @@ _Read_dmesgToKnockLogFile_()
 			if [ -f "$knockLoopDaemonSEM" ]
 			then
 				logMsg="Exiting $shScriptName dmesg log daemon"
-				_LogMsg_ "$logMsg" ; _LogKnock_ "$logMsg"
+				_LogMsg_ "$logMsg" "$pLogWARNG" ; _LogKnock_ "$logMsg"
 				break
 			fi
             _Check_dmesgKnockLogFileSize_
@@ -3616,6 +3644,7 @@ then printf '' > "$dmesgKnockLogFILE"
 fi
 
 nohup "$shScriptFile" -dmesgLog "$$" >/dev/null &
+sleep 1  #Give some time for 2nd daemon to start#
 
 isDEBUG=false
 portNumOK=false
