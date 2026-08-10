@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Aug-07
+# Last Updated: 2026-Aug-09
 ########################################################################
 
 #Update Log:
@@ -93,7 +93,7 @@
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26080700"
+readonly VERS_TAG="Beta_26080922"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -268,8 +268,8 @@ CleanUp()
 	then stty "$stty_save"
 	fi
 	banner
-    _ReleaseMutexFLock_ checkLockOK
 	printf "\nExiting...\n"
+	_ReleaseMutexFLock_ checkLockOK
 	exit 1
 }
 
@@ -1988,6 +1988,7 @@ _ReleaseMutexFLock_()
 	   [ "$knockMutexFLock_OK" = "false" ]
 	then return 0
 	fi
+	touch "$knockLoopDaemonSEM"
 	printf '' > "$knockMutexFLock_FN"
 	flock -u "$knockMutexFLock_FD" 2>/dev/null
 	eval exec "${knockMutexFLock_FD}>&-"
@@ -2789,8 +2790,8 @@ _Read_dmesgToKnockLogFile_()
 
 	if _CheckSkynetInstalled_
 	then
-		checkCount=10
-		waitUSleep=200000
+		checkCount=6
+		waitUSleep=333000
 		logMsg="Skynet add-on was found installed"
 		_LogMsg_ "$logMsg" "$pLogWARNG" ; _LogKnock_ "$logMsg"
 	else
@@ -3658,8 +3659,8 @@ knockWaitMAX=60
 prevKnockSIG="N/A"
 nextKnockSIG="N/A"
 
-msgDATA=""
 nextID="N/A"
+msgDATA=""
 
 Read_dmesgDATA
 prevID="$(Read_dmesgID checkID)"
@@ -3696,9 +3697,12 @@ do
     # But allow/accept a different Port Knock after ~8 secs.
     # This allows for faster handling of Multi-Port Knocks.
     #---------------------------------------------------------#
-    if { [ -z "$nextID" ] || [ "$prevID" = "$nextID" ] ; } || \
+    if [ -z "$nextID" ] || \
+       { [ "$nextID" -ne 0 ] && [ "$prevID" = "$nextID" ]
+       } || \
        { [ "$prevKnockSIG" = "$nextKnockSIG" ] && \
-         [ "$knockWaitNUM" -lt "$knockWaitMAX" ] ; }
+         [ "$knockWaitNUM" -lt "$knockWaitMAX" ]
+       }
     then continue
     fi
 
@@ -3848,12 +3852,12 @@ do
 
         if [ -n "$thePortNum" ] && [ "${kPORTx}_${kPROTO}" = "$thePortNum" ]
         then
-            logMsg="Executing CMD=[$theCMDx] PORT=[$thePORTx] SRC=[$kSRCIP] IF=[$kIFACE]"
+            logMsg="Executing CMD=[$theCMDx] PORT=[$thePORTx] IF=[$kIFACE] SRC=[$kSRCIP]"
             _LogMsg_ "$logMsg" "$pLogWARNG" ; _LogKnock_ "$logMsg"
-            # If calling a script pass the port knock sequence info #
+            # If calling a script pass relevant port knock info #
             if ! echo "$theCMDx" | grep -qE "($SCRIPTS_DIR|$INSTALL_DIR)/.+"
             then eval $theCMDx &
-            else eval $theCMDx "$thePORTx" "$kSRCIP" "$kIFACE" &
+            else eval $theCMDx "$kIFACE" "$kSRCIP" "$thePORTx" &
             fi
             thePortNum="" ; srceIPaddr=""
             break  #Get Next Port Knock#
@@ -3867,7 +3871,15 @@ do
 
     # Get retry entry #
     Read_dmesgDATA
-    prevID="$(Read_dmesgID checkID)"
+    prevID="$(Read_dmesgID)"
+
+    if [ "$prevKnockSIG" != "$nextKnockSIG" ]
+    then  #Reset for new port knock#
+        prevID="$nextID"
+        nextKnockSIG="$prevKnockSIG"
+    else
+        prevID="$(Read_dmesgID checkID)"
+    fi
 done
 
 renice 0 $$
