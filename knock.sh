@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Aug-09
+# Last Updated: 2026-Aug-15
 ########################################################################
 
 #Update Log:
@@ -90,10 +90,11 @@
 # - Screen phase out: Remove option to install screen
 # - Provided method to direct install develop version
 # - Fixed issue with Skynet flooding the dmesg buffer with unsolicited WAN traffic entries.
+# - Correctly display new version during update
 
 readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26080922"
+readonly VERS_TAG="Beta_26081517"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -2969,7 +2970,12 @@ fi
 #Added option for update version display#
 if [ "$1" = "-version" ]
 then
-	echo -e "Knock version:\t$REV"
+	if [ ! -f "$developFlag" ]
+	then
+		echo -e "Knock version:\t$REV"
+	else
+		echo -e "Knock version:\t$REV ${MAGNTct}$developVer_TAG${CLEARct}"
+	fi
 	exit 0
 fi
 
