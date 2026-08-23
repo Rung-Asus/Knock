@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Jun-29
+# Last Updated: 2026-Aug-15
 ########################################################################
 
 #Update Log:
@@ -83,9 +83,18 @@
 #   - Usability, performance, and stability improvements throughout
 # - Updated URL display for new UDP/TCP tags
 # - Removed code for 2.x compatibility during beta
-readonly version=3.0.0
+# 3.1.0
+# - Added clipboard paste capability to editor
+# - Fixed wrong version displayed after update
+# - Ugraded editor to navigatable fields
+# - Screen phase out: Remove option to install screen
+# - Provided method to direct install develop version
+# - Fixed issue with Skynet flooding the dmesg buffer with unsolicited WAN traffic entries.
+# - Correctly display new version during update
+
+readonly version=3.1.0
 readonly REV="$version"
-readonly VERS_TAG="Stable_26062914"
+readonly VERS_TAG="Beta_26081517"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -115,6 +124,7 @@ readonly REDct="\e[1;31m"
 readonly GREENct="\e[1;32m"
 readonly YELLWct="\e[1;33m"
 readonly MAGNTct="\e[1;35m"
+readonly CRITLct="\e[1;41m"
 readonly ERRORct="$REDct"
 readonly WARNGct="$YELLWct"
 
@@ -160,17 +170,49 @@ readonly servicesStart="${SCRIPTS_DIR}/services-start"
 readonly developFlag="${INSTALL_DIR}/develop"
 readonly cm="\xE2\x9C\x94"
 
+# For Debug Logging of Port Knocks #
+logKnockEnabled=false
+readonly logKnockFName="portKnock_DEBUG.LOG"
+readonly logKnockFPath="${INSTALL_DIR}/$logKnockFName"
+readonly logKnockSizeMAX=32768  #32KB or 64KB=65536#
+readonly logKnockTimeStamp="%Y-%b-%d %H:%M:%S"
+
+#Variables for built-in field editor#
+readonly uprow1="\e[1A"
+readonly uprow2="\e[2A"
+readonly uprow3="\e[3A"
+readonly uprow4="\e[4A"
+readonly dnrow1="\e[1B"
+readonly dnrow2="\e[2B"
+readonly dnrow3="\e[3B"
+readonly dnrow4="\e[4B"
+readonly wrapoff="\e[?7l"
+readonly wrapon="\e[?7h"
+readonly clearline="\e[K"  #Clear line at cursor#
+readonly linehelp1g="${wrapoff}| ${GREENct}Enter a comment for this port knocking entry.${CLEARct}${wrapon}"
+readonly linehelp2g="${wrapoff}| ${GREENct}Enter the knock port(s) [comma separated]. Use xxxx:U syntax for UDP ports.${CLEARct}${wrapon}"
+readonly linehelp3g="${wrapoff}| ${GREENct}Enter the incoming knock interface(s) [comma separated].${CLEARct}${wrapon}"
+readonly linehelp4g="${wrapoff}| ${GREENct}Enter the command to be executed when this knock is received.${CLEARct}${wrapon}"
+
 #To handle ID field from iOS always being ZERO#
 readonly FAKE_NUMID=65555   #Valid ID values are below 64K#
 readonly FAKE_KMESG="$shScriptName IN= OUT= MAC= SRC= DST= LEN= TOS= PREC= TTL= ID=$FAKE_NUMID PROTO="
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Aug-06] #
+#-------------------------------------#
+readonly dmesgKnockLinesMAX=100
+readonly dmesgKnockLogFILE="${TEMP_DIR}/knock_dmesg.LOG"
 
 if [ ! -f "$developFlag" ]
 then
 	readonly branchxStr_TAG=""
 	readonly developVer_TAG=""
+	readonly versionStr_TAG="[v${version}]"
 else
 	readonly branchxStr_TAG="[Branch: development]"
 	readonly developVer_TAG="[${version}_${VERS_TAG}]"
+	readonly versionStr_TAG="[v${version}_${VERS_TAG}]"
 fi
 
 readonly REPO_URL="https://raw.githubusercontent.com/Rung-Asus/Knock"
@@ -191,8 +233,6 @@ useEntwareScreen=false
 #----------------------------------------#
 #Trap exit to restore TTY#
 trap 'CleanUp' HUP INT QUIT ABRT TERM
-
-#set -x
 
 #----------------------------------------#
 # Modified by Martinski W. [2026-Jun-18] #
@@ -229,41 +269,44 @@ CleanUp()
 	then stty "$stty_save"
 	fi
 	banner
-    _ReleaseMutexFLock_ checkLockOK
 	printf "\nExiting...\n"
+	_ReleaseMutexFLock_ checkLockOK
 	exit 1
 }
 
 ###############################################
 # Rung's tiny line editor
 #
-function editline {
+EditLine()
+{
 #
 #Input:
 #	$header = Text in front of edit line
 #	$st = current data in edit string
 #Output:
 #	$st = user edited version of string
-#	$keypress2 = exit key (currently only
-#           "<ENT>" = enter will exit editting)
+#	$keypress2 = exit key ("<ENT>" = enter,
+#                     "<UP>" = up, "<DN>" = down)
 #
 #Note: $st should only a single line of ascii
 # characters w/o control charaters (tabs will
 # be converted to spaces)
 
-left="\x08"		#Cursor left 1
-right="\e[C"		#Cursor right 1
-clearline="\e[K"	#Clear line at cursor
-savecursor="\e[s"	#Save current cursor position
-restorecursor="\e[u"	#Restore current cursor position
-startline="\x0d"	#Move to start of line
-rightcursor1="\e["	#Cursor right x (start)
-rightcursor2="C"	#Cursor right x (end)
-moreright="\e[7m>\e[0m"	#Inverse ">"
-moreleft="\e[7m<\e[0m"	#Inverse "<"
+left="\x08"              #Cursor left 1#
+right="\e[C"             #Cursor right 1#
+savecursor="\e7"         #Save current cursor position [ANSI standard]#
+restorecursor="\e8"      #Restore current cursor position [ANSI standard]#
+startline="\x0d"         #Move to start of line#
+rightcursor1="\e["       #Cursor right x (start)#
+rightcursor2="C"         #Cursor right x (end)#
+moreright="\e[7m>\e[0m"  #Inverse ">"#
+moreleft="\e[7m<\e[0m"   #Inverse "<"#
 
-
-function keypress2 {
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jul-28] #
+#----------------------------------------#
+GetKeyPress2()
+{
 #Assumes inptut blocking has been disabled ('stty -echo -icanon -icrnl time 0 min 0')
 #Scans keyboard and returns immediately if nothing is pressed
 #
@@ -272,13 +315,14 @@ function keypress2 {
 #	$keypress = raw undecoded key data
 #	$keypress2 = character entered or ascii representation of entered control code (size > 1)
 
-	keypress=$(cat)
-	if  [ ${#keypress} -eq 0 ]; then
-		return 0
+	keypress="$(cat)"
+	if [ "${#keypress}" -eq 0 ]
+	then return 0
 	fi
 
-	d=$(printf "%d" "'$keypress")
-	case $d in
+	num="$(printf "%d" "'$keypress")"
+
+	case $num in
 	 9) keypress2="<TAB>";;
 	 13) keypress2="<ENT>";;
 	 27) case ${keypress:1} in
@@ -286,25 +330,31 @@ function keypress2 {
 		 [B) keypress2="<DN>";;
 		 [C) keypress2="<RT>";;
 		 [D) keypress2="<LF>";;
-		 [F) keypress2="<END>";;
-		 [H) keypress2="<HM>";;
+		 [F|[4~) keypress2="<END>";;
+		 [H|[1~) keypress2="<HME>";;
 		 [2~) keypress2="<INS>";;
 		 [3~) keypress2="<DEL>";;
 		 [5~) keypress2="<PGU>";;
 		 [6~) keypress2="<PGD>";;
-		 *) keypress2="^["${keypress:1};;
+		 *) keypress2="^[${keypress:1}";;
 		esac;;
-	 [1-8] | 1[0-9] | 2[0-6]) keypress2='^'$(printf "\x$(printf %x $((64+$d)))");;
-	 29) keypress2="^]"${keypress:1};;
-	 30) keypress2="^^"${keypress:1};;
-	 31) keypress2="^_"${keypress:1};;
-	 127) keypress2="<BCK>";;
-	 *) keypress2=$keypress;;
+	 [1-7] | 1[0-9] | 2[0-6]) keypress2='^'$(printf "\x$(printf %x $((64 + num)))");;
+	 29) keypress2="^]${keypress:1}";;
+	 30) keypress2="^^${keypress:1}";;
+	 31) keypress2="^_${keypress:1}";;
+	 8|127) keypress2="<BCK>";;
+	 # Force return of single character #
+	 #*) keypress2="$keypress";;
+	  *) keypress2="${keypress:0:1}";;
  	esac
-	return ${#keypress2}
+	return "${#keypress2}"
 }
 
-function refresh {
+#----------------------------------------#
+# Modified by Martinski W. [2026-Jul-27] #
+#----------------------------------------#
+DoRefresh()
+{
 #Refreshes the current edit line with cursor, header, and "more" arrows
 #Input:
 #	header = string displayed before edit line
@@ -316,9 +366,11 @@ function refresh {
 #	buf = updated buffer
 
 	buf="${st:$offset:$bufsize}"
-	echo -ne "$startline$clearline"
+	echo -ne "${startline}$clearline"
 	echo -n "$header"
-	if [ "$offset" -eq 0 ]; then
+
+	if [ "$offset" -eq 0 ]
+	then
 		echo -n " "
 	else
 		echo -ne "$moreleft"
@@ -326,119 +378,183 @@ function refresh {
 	echo -ne "$savecursor"
 	echo -n "$buf"
 
-	if [ "$((${#st}-$offset))" -gt "$bufsize" ]; then
+	if [ "$((${#st} - offset))" -gt "$bufsize" ]
+	then
 		echo -ne "$moreright"
 	fi
 	echo -ne "$restorecursor"
-	if [ "$pos" -gt 0 ]; then
+
+	if [ "$pos" -gt 0 ]
+	then
 		echo -ne "$rightcursor1$pos$rightcursor2"
 	fi
 }
 
-#Start of editline function execution
+  #Start of EditLine function execution#
 
- $(stty -echo -icanon -icrnl time 0 min 0)	#Read keyboard without blocking
- st="$(echo "$st" | sed 's/\t/     /')"	#Remove any tabs from input string
- cols=$(stty size | awk '{print $2}') 	#Console width
- bufsize=$((cols-${#header}-10)) 	#Line buffer size
- offset=0 				#Initial offset from edit string to buffer
- pos=0 					#Initial cursor position in buffer
+  stty -echo -icanon -icrnl time 0 min 0     #Read keyboard without blocking#
+  st="$(echo "$st" | sed 's/\t/     /')"     #Remove any tabs from input string#
+  cols="$(stty size | awk '{print $2}')"     #Console width#
+  bufsize="$((cols - ${#header} - 10))"      #Line buffer size#
+  offset=0              #Initial offset from edit string to buffer#
+  pos=0                 #Initial cursor position in buffer#
 
- refresh				#display header and edit string
+  DoRefresh             #display header and edit string#
 
- while true ; do
- #set +x
-	while true ; do
-		keypress2 || break
+ while true
+ do
+	#DEBUG ONLY# set +x
+
+	while true
+	do GetKeyPress2 || break
 	done
- #set -x
+
+	#DEBUG ONLY# set -x
 
 	case "$keypress2" in
-	 "<ENT>")
-		echo ""
+	 "<ENT>" | "<DN>" | "<UP>")
+		echo
 		break;;
+	 "<TAB>" | "^[")
+		;;
 	 "<END>")
-		pos=$((${#buf}))
-		if [ $((${#st}-$offset)) -gt $bufsize ]; then
-			offset=$((${#st}-$bufsize))
+		pos="$((${#buf}))"
+		if [ "$((${#st} - offset))" -gt "$bufsize" ]
+		then
+			offset="$((${#st} - bufsize))"
 		fi
-		refresh;;
-	 "<HM>")
+		DoRefresh;;
+	 "<HME>")
 		pos=0
 		offset=0
-		refresh;;
+		DoRefresh;;
 	 "<RT>")
-		if [ $pos -eq $bufsize ]; then
-			offset=$((offset + 1))
-			pos=$((pos - 1))
-			refresh
+		if [ "$pos" -eq "$bufsize" ]
+		then
+			offset="$((offset + 1))"
+			pos="$((pos - 1))"
+			DoRefresh
 		fi
-		if [ $pos -lt ${#buf} ]; then
-			echo -ne $right
-			pos=$((pos+1))
+		if [ "$pos" -lt "${#buf}" ]
+		then
+			echo -ne "$right"
+			pos="$((pos + 1))"
 		fi;;
 	 "<LF>")
-		if [ $pos -gt 0 ]; then
-			echo -ne $left
-			pos=$((pos-1))
-		elif [ $offset -ne 0 ]; then
-			offset=$((offset - 1))
-			refresh
+		if [ "$pos" -gt 0 ]
+		then
+			echo -ne "$left"
+			pos="$((pos - 1))"
+		elif [ "$offset" -ne 0 ]
+		then
+			offset="$((offset - 1))"
+			DoRefresh
 		fi;;
 	 "<DEL>")
-		if [ $pos -eq $bufsize ]; then
-			offset=$((offset + 1))
-			pos=$((pos - 1))
-			refresh
+		if [ $pos -eq $bufsize ]
+		then
+			offset="$((offset + 1))"
+			pos="$((pos - 1))"
+			DoRefresh
 		fi
-		if [ $pos -lt ${#buf} ]; then
-			buf="${st:$offset:$((bufsize+1))}"
-			echo -ne $savecursor$clearline
-			echo -n "${buf:$((pos+1))}"
-			st="${st:0:$((offset+pos))}""${st:$((offset+pos+1))}"
+		if [ "$pos" -lt "${#buf}" ]
+		then
+			buf="${st:$offset:$((bufsize + 1))}"
+			echo -ne "${savecursor}$clearline"
+			echo -n "${buf:$((pos + 1))}"
+			st="${st:0:$((offset + pos))}""${st:$((offset + pos + 1))}"
 			buf="${st:$offset:$bufsize}"
-			if [ $((${#st}-$offset)) -gt $bufsize ]; then
-				echo -ne $moreright
+			if [ "$((${#st} - offset))" -gt "$bufsize" ]
+			then
+				echo -ne "$moreright"
 			fi
-			echo -ne $restorecursor
+			echo -ne "$restorecursor"
 		fi;;
 	 "<BCK>")
-		if [ $pos -eq 0 ] && [ $offset -ne 0 ]; then
-			offset=$((offset - 1))
+		if [ $pos -eq 0 ] && [ $offset -ne 0 ]
+		then
+			offset="$((offset - 1))"
 			pos=1
-			refresh
+			DoRefresh
 		fi
-		if [ $pos -gt 0 ]; then
-			buf="${st:$offset:$((bufsize+1))}"
-			echo -ne $left$savecursor$clearline
+		if [ "$pos" -gt 0 ]
+		then
+			buf="${st:$offset:$((bufsize + 1))}"
+			echo -ne "${left}${savecursor}$clearline"
 			echo -n "${buf:$pos}"
-			st="${st:0:$((offset+pos-1))}""${st:$((offset+pos))}"
+			st="${st:0:$((offset + pos - 1))}""${st:$((offset + pos))}"
 			buf="${st:$offset:$bufsize}"
-			pos=$((pos-1))
-			if [ $((${#st}-$offset)) -gt $bufsize ]; then
-				echo -ne $moreright
+			pos="$((pos - 1))"
+			if [ "$((${#st} - offset))" -gt "$bufsize" ]
+			then
+				echo -ne "$moreright"
 			fi
-			echo -ne $restorecursor
+			echo -ne "$restorecursor"
 		fi;;
 	 *)
-		if [ ${#keypress2} -eq 1 ]; then
-			if [ $pos -eq $bufsize ]; then
-				offset=$((offset + 1))
-				pos=$((pos - 1))
-				refresh
+		if [ "${#keypress}" -eq 1 ]
+		then
+			keypress2="${keypress2:0:1}"
+			if [ "$pos" -eq "$bufsize" ]
+			then
+				offset="$((offset + 1))"
+				pos="$((pos - 1))"
+				DoRefresh
 			fi
-			mr=$(( ${#buf} == $bufsize ? 1 : 0 ))
-			buf="${st:$offset:$((bufsize-1))}"
+			mr="$(( ${#buf} == $bufsize ? 1 : 0 ))"
+			buf="${st:$offset:$((bufsize - 1))}"
 			echo -n "$keypress2"
-			echo -ne $savecursor$clearline
+			echo -ne "${savecursor}$clearline"
 			echo -n "${buf:$pos}"
-			if [ $mr -eq 1 ]; then
-				echo -ne $moreright
+			if [ "$mr" -eq 1 ]
+			then
+				echo -ne "$moreright"
 			fi
-			echo -ne $restorecursor
-			st="${st:0:$((offset+pos))}""$keypress2""${st:$((offset+pos))}"
+			echo -ne "$restorecursor"
+			st="${st:0:$((offset + pos))}""$keypress2""${st:$((offset + pos))}"
 			buf="${st:$offset:$bufsize}"
-			pos=$((pos+1))
+			pos="$((pos + 1))"
+
+		#handle multi-character paste#
+		elif [ "${#keypress}" -gt 1 ]
+		then
+			i=0
+			#iterate the paste sequence like a keyboard entry#
+			while [ "$i" -lt "${#keypress}" ]
+			do
+				#Filter out unhandled control chars and escape sequences#
+				num="$(printf "%d" "'${keypress:$i:1}")"
+				case $num in
+				 9 | 13) i="$((i + 1))"
+					continue;;
+
+				 [1-8] | 1[0-9] | 2[0-7])
+					break;;
+				 29 | 30 | 31 | 127)
+					break;;
+				esac
+
+				if [ "$pos" -eq "$bufsize" ]
+				then
+					offset="$((offset + 1))"
+					pos="$((pos - 1))"
+					DoRefresh
+				fi
+				mr="$(( ${#buf} == $bufsize ? 1 : 0 ))"
+				buf="${st:$offset:$((bufsize - 1))}"
+				echo -n "${keypress:$i:1}"
+				echo -ne "${savecursor}$clearline"
+				echo -n "${buf:$pos}"
+				if [ "$mr" -eq 1 ]
+				then
+					echo -ne "$moreright"
+				fi
+				echo -ne "$restorecursor"
+				st="${st:0:$((offset + pos))}""${keypress:$i:1}""${st:$((offset + pos))}"
+				buf="${st:$offset:$bufsize}"
+				pos="$((pos + 1))"
+				i="$((i + 1))"
+			done
 		fi;;
 	esac
 
@@ -449,6 +565,7 @@ function refresh {
     fi
     return 0
 }
+#End-EditLine#
 ###############################################
 
 ##-------------------------------------##
@@ -524,6 +641,38 @@ _PressAnyKey_()
 	fi
 	printf "\n$promptStr"
 	read -n1 -rs anyKEY ; echo
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jul-30] #
+#-------------------------------------#
+_CheckLogKnockFileSize_()
+{
+    if [ ! -s "$logKnockFPath" ]
+    then return 1
+    fi
+    local fileSize
+    fileSize="$(ls -1l "$logKnockFPath" | awk -F ' ' '{print $3}')"
+    if [ "$fileSize" -gt "$logKnockSizeMAX" ]
+    then
+        cp -fp "$logKnockFPath" "${logKnockFPath}.BKUP"
+        printf '' > "$logKnockFPath"
+        "$isInteractive" && \
+        printf "\nReset $logKnockFPath [$fileSize > $logKnockSizeMAX]\n"
+    fi
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Jul-30] #
+#-------------------------------------#
+_LogKnock_()
+{
+    if [ $# -eq 0 ] || [ -z "$1" ] || \
+       [ "$logKnockEnabled" = "false" ]
+    then return 1
+    fi
+    _CheckLogKnockFileSize_
+    echo "$(date +"$logKnockTimeStamp") ${logTagStr}: $1" >> "$logKnockFPath"
 }
 
 #-------------------------------------#
@@ -760,7 +909,7 @@ _RemoveCustomFirewallRules_()
     local ruleNumLST  ruleNUM
 
     ruleNumLST="$(iptables -nL INPUT --line-numbers | grep -w "\b${pkCHAIN}\b" | awk '{print $1}' | sort -r)"
-    if [ -n "ruleNumLST" ]
+    if [ -n "$ruleNumLST" ]
     then
         ruleNumLST="$(echo "$ruleNumLST" | tr '\n' ' ' | sed 's/ *$/\n/')"
         for ruleNUM in $ruleNumLST
@@ -808,23 +957,36 @@ CheckInstall()
 	return 0
 }
 
+#-------------------------------------#
+# Added by Martinski W. [2026-Jul-30] #
+#-------------------------------------#
+_CheckBackgroundProcess_()
+{
+	if "$useEntwareScreen"
+	then
+		if /opt/sbin/screen -ls knock >/dev/null
+		then return 0
+		fi
+	else
+		if top -bn1 | grep -qE "[/]$shScriptName -loop" && \
+		   top -bn1 | grep -qE "[/]$shScriptName -dmesgLog"
+		then return 0
+		fi
+	fi
+	return 1
+}
+
 #----------------------------------------#
 # Modified by Martinski W. [2026-Jun-12] #
 #----------------------------------------#
 #Verify knock rules are in firewall and background process is running#
 CheckStatus()
 {
-	if "$useEntwareScreen"
-	then
-		if ! /opt/sbin/screen -ls knock >/dev/null
-		then return 1
-		fi
-	else
-		if ! top -bn1 | grep -qE "[/]$shScriptName -loop"
-		then return 1
-		fi
+	if _CheckBackgroundProcess_ && \
+	   _CheckCustomFirewallRules_
+	then return 0
+	else return 1
 	fi
-	_CheckCustomFirewallRules_ && return 0 || return 1
 }
 
 #-------------------------------------#
@@ -868,6 +1030,14 @@ _CheckConfigurationFile_()
             errorFound=true
             "$isVerboseMode" && \
             _LogMsg_ "**ERROR**: The port knock entry [$cfgLINE] is INVALID" "$pLogERROR"
+            continue
+        fi
+
+        if echo "$theCMDx" | grep -qE "^[[:blank:]]*[#].*"
+        then
+            errorFound=true
+            "$isVerboseMode" && \
+            _LogMsg_ "**ERROR**: The port knock command [$theCMDx] is INVALID" "$pLogERROR"
             continue
         fi
 
@@ -932,20 +1102,23 @@ _CreateCustomFirewallRules_()
 	local cfgLINE  thePORTS  theIFACE  theCMDx 
 	local portIFacesLst  portNumSeqLst  portListCount
 	local activeIFaceOK  portNumOK  pIFace  pNumber  thePort
-	local isVerboseMode=true  silentARG=""
+	local isVerboseMode=true  silentARG=""  logMsg
 
-    if [ $# -gt 0 ] && [ "$1" = "silent" ]
-    then
-        silentARG="$1" ; isVerboseMode=false
-    fi
+	if [ $# -gt 0 ] && [ "$1" = "silent" ]
+	then
+		silentARG="$1" ; isVerboseMode=false
+	fi
 
 	if ! _CheckConfigurationFile_ "$silentARG"
 	then return 1
 	fi
 
-	"$isVerboseMode" && \
-	_LogMsg_ "Adding port knocking rules to firewall" "$pLogWARNG"
-	"$isVerboseMode" && echo
+	logMsg="Adding port knocking rules to firewall"
+	if "$isVerboseMode"
+	then
+		_LogMsg_ "$logMsg" "$pLogWARNG" ; echo
+	fi
+	_LogKnock_ "$logMsg"
 
 	if ! iptables -S "$pkCHAIN" >/dev/null 2>&1
 	then iptables -N "$pkCHAIN"
@@ -965,7 +1138,8 @@ _CreateCustomFirewallRules_()
 		theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
 		theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
 
-		if [ -z "$thePORTS" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
+		if [ -z "$thePORTS" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ] || \
+		   echo "$theCMDx" | grep -qE "^[[:blank:]]*[#].*"
 		then continue  #INVALID#
 		fi
 
@@ -1070,7 +1244,8 @@ CheckFirewall()
 		theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
 		theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
 
-		if [ -z "$thePORTS" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
+		if [ -z "$thePORTS" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ] || \
+		   echo "$theCMDx" | grep -qE "^[[:blank:]]*[#].*"
 		then continue  #INVALID#
 		fi
 
@@ -1235,7 +1410,8 @@ UpdateScript()
 			$shScriptFile -start -nobanner
 			echo "Update completed."
 			echo
-			echo -e "Knock version:\t$REV"
+			#Show updated version#
+			$shScriptFile -version
 			ShowStatus
 			ShowConfig quietCheck
 		else
@@ -1250,7 +1426,7 @@ UpdateScript()
 }
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-06] #
+# Modified by Martinski W. [2026-Jul-27] #
 #----------------------------------------#
 EditPortKnockConfig()
 {
@@ -1294,79 +1470,156 @@ EditPortKnockConfig()
 
 	EditPortKnockEntry()
 	{
-		local portCount  errorFound=false
-		local pNumber  pIFace  allGood  portCount
+		local linehelp1="$linehelp1g"
+		local linehelp2="$linehelp2g"
+		local linehelp3="$linehelp3g"
+		local linehelp4="$linehelp4g"
+		local pNumber  pIFace  allGood  portCount  linenum=1
 
-		#Edit comment#
-		st="$comment"
-		header="     Comment:"
-		editline
-		comment="$st"
+		local cols="$(stty size | awk '{print $2}')"   #Console width#
+		local dashes="+$(head -c "$((cols - 1))" </dev/zero | tr '\0' '-')"
 
-		#Edit ports#
-		st="$ports"
-		header="     Port(s):"
-		editline
-		st="$(_NormalizeCSVList_ "$st")"
+		#Initial help#
+		printf "\nEnter knock parameters below. Navigate w/ <UP> and <DN>, <SHIFT><INS> for clipboard paste, <ENT> when done.\n${dashes}\n"
+		printf "|\n|\n|\n|\n\n\n${uprow1}${dashes}\r${uprow4}${uprow1}"  #Draw lower bounding box#
 
-		#Capitalize protocol letters#
-		st="$(echo "$st" | tr 'udtcp' 'UDTCP')"
-
-		allGood=true
-		portCount=0
-		modPorts="$(echo "$st" | sed 's/,/ /g')"
-		_AddModPortsToFullList_ "$ports" "$modPorts"
-
-		for pNumber in $modPorts
+		while true
 		do
-			portCount="$((portCount + 1))"
-			if ! _ValidatePortNumber_ "$pNumber" NOLOG
-			then allGood=false
-			fi
-			if _CheckDupPortFound_ "$pNumber" NOLOG
-			then allGood=false
-			fi
-		done
-		if [ "$portCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
-		then
-			allGood=false
-			_LogMsg_ "**ERROR**: INVALID number of ports [$st] found" "$pLogERROR" NOLOG
-		fi
-		if "$allGood"
-		then
-			ports="$st"
-		else
-			errorFound=true
-			printf "Port list [$st] is ${ERRORct}INVALID${CLEARct}. Changes not saved.\n\n"
-		fi
+			case $linenum in
+			 1)
+				printf "${dnrow4}${clearline}${linehelp1}${uprow4}"
+				header="|      Comment:"
+				st="$comment"
+				EditLine
+				[ -z "$st" ] && st="#"  #Check for blank output#
+				comment="$st"
+				if [ "$keypress2" = "<UP>" ]
+				then
+					printf "${uprow1}"
+				else
+					linenum=2
+				fi
+				;;
+			 2)
+				printf "${dnrow3}${clearline}${linehelp2}${uprow3}"
+				header="|      Port(s):"
+				st="$ports"
+				EditLine
+				[ -z "$st" ] && st="#"  #Check for blank output#
+				st="$(_NormalizeCSVList_ "$st")"
+				st="$(echo "$st" | tr 'udtcp' 'UDTCP')" #Capitaliize protocol letters#
+				allGood=true
+				portCount=0
+				modPorts="$(echo "$st" | sed 's/,/ /g')"
+				_AddModPortsToFullList_ "$ports" "$modPorts"
+				for pNumber in $modPorts
+				do
+					portCount="$((portCount + 1))"
+					if ! _ValidatePortNumber_ "$pNumber" silent
+					then allGood=false
+					fi
+					if _CheckDupPortFound_ "$pNumber" silent
+					then allGood=false
+					fi
+				done
+				if [ "$portCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
+				then
+					linehelp2="${wrapoff}| ${REDct}**ERROR**: INVALID number of ports [$st] found. Try again!${CLEARct}${wrapon}"
+					printf "${uprow1}"
+					continue
+				fi
+				if "$allGood"
+				then
+					linehelp2="$linehelp2g"
+					ports="$st"
+				else
+					linehelp2="${wrapoff}| ${REDct}Port list [$st] is ${ERRORct}INVALID. Try again!${CLEARct}${wrapon}"
+					printf "${uprow1}"
+					continue
+				fi
 
-		#Edit interfaces#
-		st="$interfaces"
-		header="Interface(s):"
-		editline
-		st="$(_NormalizeCSVList_ "$st")"
-		allGood=true
-		for pIFace in $(echo "$st" | sed 's/,/ /g')
-		do
-			if _CheckInterface_ "$pIFace" NOLOG
-			then continue
-			fi
-			allGood=false  #INACTIVE IFace#
-		done
-		if "$allGood"
-		then
-			interfaces="$st"  #ACTIVE IFace(s)#
-		else
-			errorFound=true
-			printf "Interface list [$st] is ${ERRORct}INVALID${CLEARct}. Changes not saved.\n\n"
-		fi
+				if [ "$keypress2" = "<UP>" ]
+				then
+					printf "${uprow2}"
+					linenum=1
+				else
+					linenum=3
+				fi
+				;;
 
-		#Edit command#
-		st="$cmd"
-		header="     Command:"
-		editline
-		cmd="$st"
-		"$errorFound" && return 1 || return 0
+			 3)
+				printf "${dnrow2}${clearline}${linehelp3}${uprow2}"
+				header="| Interface(s):"
+				st="$interfaces"
+				EditLine
+				[ -z "$st" ] && st="#"  #Check for blank output#
+				st="$(_NormalizeCSVList_ "$st")"
+				allGood=true
+				for pIFace in $(echo "$st" | sed 's/,/ /g')
+				do
+					if _CheckInterface_ "$pIFace" silent
+					then continue
+					fi
+					allGood=false  #INACTIVE IFace#
+				done
+				if "$allGood"
+				then
+					linehelp3="$linehelp3g"
+					interfaces="$st"  #ACTIVE IFace(s)#
+				else
+					linehelp3="${wrapoff}| ${REDct}Interface list [$st] is ${ERRORct}INVALID. Try again!${CLEARct}${wrapon}"
+					printf "${uprow1}"
+					continue
+				fi
+
+				if [ "$keypress2" = "<UP>" ]
+				then
+					printf "${uprow2}"
+					linenum=2
+				else
+					linenum=4
+				fi
+				;;
+
+			 4)
+				printf "${dnrow1}${clearline}${linehelp4}${uprow1}"
+				header="|      Command:"
+				st="$cmd"
+				EditLine
+				[ -z "$st" ] && st="#"  #Check for blank output#
+				allGood=true
+				if [ -z "$st" ] || echo "$st" | grep -qE "^[[:blank:]]*[#].*"
+				then
+					allGood=false
+				fi
+				if "$allGood"
+				then
+					linehelp4="$linehelp4g"
+					cmd="$st"
+				else
+					linehelp4="${wrapoff}| ${REDct}Command [$st] is ${ERRORct}INVALID. Try again!${CLEARct}${wrapon}"
+					printf "${uprow1}"
+					continue
+				fi
+
+				if [ "$keypress2" = "<UP>" ]
+				then
+					printf "${uprow2}"
+					linenum=3
+				elif [ "$keypress2" = "<DN>" ]
+				then
+					printf "${uprow1}"
+					linenum=4
+				else
+					printf "${clearline}| ${GREENct}Saving parameters...${CLEARct}\n${dnrow1}"
+					break
+				fi
+				;;
+			esac
+
+		done
+
+		return 0
 	}
 
 	#Read configuration file into virtual array#
@@ -1439,7 +1692,7 @@ EditPortKnockConfig()
 				portIFacesLst="$(echo "$IFaces" | tr ',' ' ')"
 				portNumSeqLst="$(echo "$kPorts" | tr ',' ' ')"
 				portListCount="$(echo "$kPorts" | awk -F',' '{print NF}')"
-				activeIFaceOK=true ; portNumOK=true
+				activeIFaceOK=true ; portNumOK=true ; theCmdOK=true
 
 				for pIFace in $portIFacesLst
 				do
@@ -1464,7 +1717,14 @@ EditPortKnockConfig()
 					_LogMsg_ "**ERROR**: INVALID number of ports [$kPorts] found" "$pLogERROR" NOLOG
 				fi
 
-				if [ "$portNumOK" = "false" ] || \
+				if [ -z "$theCMD" ] || echo "$theCMD" | grep -qE "^[[:blank:]]*[#].*"
+				then
+					theCmdOK=false
+					_LogMsg_ "**ERROR**: INVALID command [$theCMD] found" "$pLogERROR" NOLOG
+				fi
+
+				if [ "$theCmdOK" = "false" ] || \
+				   [ "$portNumOK" = "false" ] || \
 				   [ "$activeIFaceOK" = "false" ]
 				then
 					_LogMsg_ "**ERROR**: The port knock entry is INVALID" "$pLogERROR" NOLOG
@@ -1729,10 +1989,30 @@ _ReleaseMutexFLock_()
 	   [ "$knockMutexFLock_OK" = "false" ]
 	then return 0
 	fi
+	touch "$knockLoopDaemonSEM"
 	printf '' > "$knockMutexFLock_FN"
 	flock -u "$knockMutexFLock_FD" 2>/dev/null
 	eval exec "${knockMutexFLock_FD}>&-"
 	knockMutexFLock_OK=false
+}
+
+_ValidateMutexFLock_()
+{
+    if [ ! -s "$knockMutexFLock_FN" ]
+    then return 1
+    fi
+    local procInfo  procName  procIDno  procIDof=""
+
+    procInfo="$(head -n1 "$knockMutexFLock_FN")"
+    procName="$(echo "$procInfo" | cut -d'|' -f1)"
+    procIDno="$(echo "$procInfo" | cut -d'|' -f2)"
+    if [ -n "$procName" ] && [ -n "$procIDno" ]
+    then procIDof="$(pidof "$procName")"
+    fi
+    if [ -z "$procIDof" ] || [ "$procIDno" -ne "$1" ]
+    then return 1
+    fi
+    return 0
 }
 
 _AcquireMutexFLock_()
@@ -1781,7 +2061,7 @@ ShowConfig()
 {
 	local lastComment  commandNum=0  portNx  portNx2  IFaceIPaddr
 	local portIFacesLst  portNumSeqLst  portListCount
-	local activeIFaceOK  portNumOK  pIFace  pNumber
+	local activeIFaceOK  portNumOK  theCmdOK  pIFace  pNumber
 	local fullPortLIST=""  dupPortLIST=""  silentARG=""
 
 	if [ $# -gt 0 ] && [ "$1" = "quietCheck" ]
@@ -1820,7 +2100,7 @@ ShowConfig()
 			portIFacesLst="$(echo "$theIFACE" | tr ',' ' ')"
 			portNumSeqLst="$(echo "$thePORTS" | tr ',' ' ')"
 			portListCount="$(echo "$thePORTS" | awk -F',' '{print NF}')"
-			activeIFaceOK=true ; portNumOK=true
+			activeIFaceOK=true ; portNumOK=true ; theCmdOK=true
 
 			for pIFace in $portIFacesLst
 			do
@@ -1845,7 +2125,14 @@ ShowConfig()
 				_LogMsg_ "**ERROR**: INVALID number of ports [$thePORTS] found" "$pLogERROR" NOLOG
 			fi
 
-			if [ "$portNumOK" = "false" ] || \
+			if [ -z "$theCMDx" ] || echo "$theCMDx" | grep -qE "^[[:blank:]]*[#].*"
+			then
+				theCmdOK=false
+				_LogMsg_ "**ERROR**: INVALID command [$theCMDx] found" "$pLogERROR" NOLOG
+			fi
+
+			if [ "$theCmdOK" = "false" ] || \
+			   [ "$portNumOK" = "false" ] || \
 			   [ "$activeIFaceOK" = "false" ]
 			then
 				_LogMsg_ "*WARNING*: The port knock entry may be ignored" "$pLogWARNG" NOLOG
@@ -1955,7 +2242,8 @@ _StartBackground_ScreenProcess_()
 	while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
 	do
 		sleep 1
-		if /opt/sbin/screen -ls knock >/dev/null
+		if /opt/sbin/screen -ls knock >/dev/null && \
+		   top -bn1 | grep -qE "[/]$shScriptName -dmesgLog"
 		then break
 		fi
 	done
@@ -2028,7 +2316,8 @@ _StartBackground_DaemonProcess_()
 	while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
 	do
 		sleep 1
-		if top -bn1 | grep -qE "[/]$shScriptName -loop"
+		if top -bn1 | grep -qE "[/]$shScriptName -loop" && \
+		   top -bn1 | grep -qE "[/]$shScriptName -dmesgLog"
 		then break
 		fi
 	done
@@ -2054,13 +2343,15 @@ _StopBackground_DaemonProcess_()
 	while [ "$((sleepSecsNUM++))" -lt "$sleepSecsMAX" ]
 	do
 		sleep 1
-		if top -bn1 | grep -qE "[/]$shScriptName -loop"
+		if top -bn1 | grep -qE "[/]$shScriptName -loop" || \
+		   top -bn1 | grep -qE "[/]$shScriptName -dmesgLog"
 		then continue
 		fi
 		break
 	done
 
-	if top -bn1 | grep -qE "[/]$shScriptName -loop"
+	if top -bn1 | grep -qE "[/]$shScriptName -loop" || \
+	   top -bn1 | grep -qE "[/]$shScriptName -dmesgLog"
 	then return 1
 	else return 0
 	fi
@@ -2071,7 +2362,8 @@ _StopBackground_DaemonProcess_()
 #-------------------------------------#
 _CheckAndStopBackground_DaemonProcess_()
 {
-	if top -bn1 | grep -qE "[/]$shScriptName -loop"
+	if top -bn1 | grep -qE "[/]$shScriptName -loop" || \
+	   top -bn1 | grep -qE "[/]$shScriptName -dmesgLog"
 	then
 		{ [ $# -eq 0 ] || [ -z "$1" ] ; } && \
 		printf "An existing background process must be stopped first. Please wait...\n"
@@ -2090,6 +2382,7 @@ _StartBackgroundProcess_()
 	if ! _CheckConfigurationFile_
 	then return 1
 	fi
+	local logMsg
 
 	_RemoveCustomFirewallRules_ INPUT
 
@@ -2108,7 +2401,8 @@ _StartBackgroundProcess_()
 	printf "Waiting to set firewall rules...\n"
 	_WaitForCustomFirewallRules_ 5
 
-	_LogMsg_ "Starting $shScriptName background process" "$pLogWARNG"
+	logMsg="Starting $shScriptName background process"
+	_LogMsg_ "$logMsg" "$pLogWARNG" ; _LogKnock_ "$logMsg"
 	printf "Please wait...\n"
 
 	if "$useEntwareScreen"
@@ -2129,7 +2423,10 @@ _StartBackgroundProcess_()
 			printf "Knock.sh has started and is ready for port knocks\n"
 		fi
 	else
-		printf "\nERROR: Cannot start $shScriptName background process\n\n"
+		echo
+		logMsg="**ERROR**: Cannot start $shScriptName background process"
+		_LogMsg_ "$logMsg" "$pLogERROR" ; _LogKnock_ "$logMsg"
+		echo
 		return 1
 	fi
 	return 0
@@ -2144,8 +2441,12 @@ _StopBackgroundProcess_()
 	then
 		banner
 	fi
-	local bgProcStopOK=false
-	printf "\nStopping $shScriptName background process. Please wait...\n"
+	local logMsg  bgProcStopOK=false
+
+	echo
+	logMsg="Stopping $shScriptName background process"
+	_LogMsg_ "$logMsg" "$pLogWARNG" ; _LogKnock_ "$logMsg"
+	printf "Please wait...\n"
 
 	#Make sure to stop ALL background processes#
 	if _CheckAndStopBackground_ScreenProcess_ silent && \
@@ -2158,7 +2459,10 @@ _StopBackgroundProcess_()
 		printf "The $shScriptName background process was stopped\n"
 		return 0
 	else
-		printf "The $shScriptName background process was NOT stopped\n"
+		echo
+		logMsg="**ERROR**: The $shScriptName background process was NOT stopped"
+		_LogMsg_ "$logMsg" "$pLogERROR" ; _LogKnock_ "$logMsg"
+		echo
 		return 1
 	fi
 }
@@ -2230,6 +2534,50 @@ _GetConfigOption_()
 }
 
 #-------------------------------------#
+# Added by Martinski W. [2026-Jul-30] #
+#-------------------------------------#
+_LogKnockOption_()
+{
+    local logKnockUpdated=false
+
+    case "$1" in
+        enable)
+            logKnockUpdated=true
+            logKnockEnabled=true
+            _SetConfigOption_ LOG_KNOCK_ENABLE true
+            printf "\n Debug log of port knocks is now ${MAGNTct}ENABLED${CLEARct}"
+            printf "\n [Log File: ${GREENct}${logKnockFPath}${CLEARct}]\n"
+            ;;
+        disable)
+            logKnockUpdated=true
+            logKnockEnabled=false
+            _SetConfigOption_ LOG_KNOCK_ENABLE false
+            printf "\n Debug log of port knocks is now ${YELLWct}DISABLED${CLEARct}\n"
+            ;;
+        check)
+            logKnockEnabled="$(_GetConfigOption_ LOG_KNOCK_ENABLE false)"
+            "$logKnockEnabled" && return 0 || return 1
+            ;;
+         *) ##IGNORE##
+            ;;
+    esac
+
+    if "$logKnockUpdated"
+    then
+        if _CheckBackgroundProcess_
+        then
+            printf "\n Make sure to restart the knock background process"
+            printf "\n so that the new debug log setting can take effect.\n"
+            printf "\n Would you like to restart the background process now? (y/n):"
+            if PromptYN
+            then _StartBackgroundProcess_ -menu
+            fi
+        fi
+        _PressAnyKey_
+    fi
+}
+
+#-------------------------------------#
 # Added by Martinski W. [2026-May-31] #
 #-------------------------------------#
 _InvalidMenuOptionHandler_()
@@ -2241,10 +2589,12 @@ _InvalidMenuOptionHandler_()
 	_PressAnyKey_
 }
 
+# Configuration Settings #
+logKnockEnabled="$(_GetConfigOption_ LOG_KNOCK_ENABLE false)"
 useEntwareScreen="$(_GetConfigOption_ USE_EW_SCREEN false)"
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-May-24] #
+# Modified by Martinski W. [2026-Jul-30] #
 #----------------------------------------#
 ## Main Menu ##
 if [ $# -eq 0 ] || [ -z "$1" ]
@@ -2256,17 +2606,23 @@ then
 		banner
 		ShowStatus
 
+		if _LogKnockOption_ check
+		then logKnockSTATUS="${MAGNTct}ENABLED"
+		else logKnockSTATUS="${YELLWct}DISABLED"
+		fi
+
 		printf " Main Menu\n"
 		printf " =========\n\n"
 		printf " ${GREENct}1${CLEARct}. Install/reinstall ${shScriptName}\n"
 		printf " ${GREENct}2${CLEARct}. Uninstall ${shScriptName}\n"
 		if CheckInstall
 		then
-			printf " ${GREENct}3${CLEARct}. Display $shScriptName config file\n"
+			printf " ${GREENct}3${CLEARct}. Display $shScriptName configuration file\n"
 			printf " ${GREENct}4${CLEARct}. Start/restart $shScriptName background process\n"
 			printf " ${GREENct}5${CLEARct}. Stop $shScriptName background process\n"
-			printf " ${GREENct}6${CLEARct}. Edit $shScriptName config file\n"
+			printf " ${GREENct}6${CLEARct}. Edit $shScriptName configuration file\n"
 			printf " ${GREENct}7${CLEARct}. Update script to latest version\n"
+			printf " ${GREENct}8${CLEARct}. Toggle debug log of port knocks [${logKnockSTATUS}${CLEARct}]\n"
 		fi
 		printf "\n ${GREENct}e${CLEARct}. Exit\n\n"
 		printf " Enter selection: "
@@ -2367,6 +2723,12 @@ then
 					_PressAnyKey_
 				fi
 				;;
+			8)
+				if [ "$logKnockEnabled" = "false" ]
+				then _LogKnockOption_ enable
+				else _LogKnockOption_ disable
+				fi
+				;;
 			*) _InvalidMenuOptionHandler_
 				;;
 		esac
@@ -2376,6 +2738,100 @@ then
 	printf "\nThanks for using ${shScriptName}!\n\n"
 	exit
 fi
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Aug-06] #
+#-------------------------------------#
+_CheckSkynetInstalled_()
+{
+	local SkynetScript="${SCRIPTS_DIR}/firewall"
+
+	if [ ! -s "$SkynetScript" ] || [ ! -s "$firewallStart" ]
+	then return 1
+	fi
+	if grep -qE "$SkynetScript .* skynetloc=.*/skynet (& )?# Skynet" "$firewallStart"
+	then return 0
+	else return 1
+	fi
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Aug-06] #
+#-------------------------------------#
+_Check_dmesgKnockLogFileSize_()
+{
+	if [ ! -s "$dmesgKnockLogFILE" ]
+	then return 0
+	fi
+	local numLines  msgLAST
+	numLines="$(wc -l < "$dmesgKnockLogFILE")"
+
+	if [ "$numLines" -gt "$dmesgKnockLinesMAX" ]
+	then  #Keep 2 entries as previous context#
+		msgLAST="$(tail -n2 "$dmesgKnockLogFILE")"
+		echo "$msgLAST" > "$dmesgKnockLogFILE"
+		echo 
+	fi
+}
+
+#-------------------------------------#
+# Added by Martinski W. [2026-Aug-06] #
+#-------------------------------------#
+_Read_dmesgToKnockLogFile_()
+{
+	local knockMSG  logMsg  waitUSleep
+	local checkCount  sleepCount  LASTmsg
+
+	if ! _ValidateMutexFLock_ "$1"
+	then
+		logMsg="**ERROR**: INVALID Mutex Lock Found."
+		_LogMsg_ "$logMsg" "$pLogERROR" ; _LogKnock_ "$logMsg"
+		return 1
+	fi
+
+	if _CheckSkynetInstalled_
+	then
+		checkCount=6
+		waitUSleep=333000
+		logMsg="Skynet add-on was found installed"
+		_LogMsg_ "$logMsg" "$pLogWARNG" ; _LogKnock_ "$logMsg"
+	else
+		checkCount=2
+		waitUSleep=1000000
+	fi
+	sleepCount=0
+
+	if [ ! -s "$dmesgKnockLogFILE" ]
+	then LASTmsg=""
+	else LASTmsg="$(tail -n1 "$dmesgKnockLogFILE")"
+	fi
+
+	while true
+	do
+		knockMSG="$(dmesg | grep -E "^${shScriptName}[[:blank:]]+" | tail -n1)"
+		if [ -n "$knockMSG" ] && [ "$knockMSG" != "$LASTmsg" ]
+		then
+			echo "$knockMSG" >> "$dmesgKnockLogFILE"
+			LASTmsg="$knockMSG"
+		fi
+		usleep "$waitUSleep"
+		sleepCount="$((sleepCount + 1))"
+
+		if [ "$((sleepCount % checkCount))" -eq 0 ]
+		then
+			sleepCount=0
+			if [ -f "$knockLoopDaemonSEM" ]
+			then
+				logMsg="Exiting $shScriptName dmesg log daemon"
+				_LogMsg_ "$logMsg" "$pLogWARNG" ; _LogKnock_ "$logMsg"
+				break
+			fi
+            _Check_dmesgKnockLogFileSize_
+		fi
+	done
+
+	return 0
+}
 
 #-------------------------------------#
 # Added by Martinski W. [2026-Jun-06] #
@@ -2511,6 +2967,18 @@ then
 	exit 0
 fi
 
+#Added option for update version display#
+if [ "$1" = "-version" ]
+then
+	if [ ! -f "$developFlag" ]
+	then
+		echo -e "Knock version:\t$REV"
+	else
+		echo -e "Knock version:\t$REV ${MAGNTct}$developVer_TAG${CLEARct}"
+	fi
+	exit 0
+fi
+
 if [ "$1" = "-status" ]
 then
 	banner
@@ -2540,7 +3008,8 @@ then
 		exit 1
 	fi
 
-	_LogMsg_ "Starting $shScriptName background process" "$pLogWARNG" NOECHO
+	logMsg="Starting $shScriptName background process"
+	_LogMsg_ "$logMsg" "$pLogWARNG" NOECHO ; _LogKnock_ "$logMsg"
 
 	#Stop any current rogue background process#
 	_CheckAndStopBackground_ScreenProcess_
@@ -2569,7 +3038,8 @@ then
 		exit 1
 	fi
 
-	_LogMsg_ "Starting $shScriptName background process" "$pLogWARNG" NOECHO
+	logMsg="Starting $shScriptName background process"
+	_LogMsg_ "$logMsg" "$pLogWARNG" NOECHO ; _LogKnock_ "$logMsg"
 
 	#Stop any current rogue background process#
 	_CheckAndStopBackground_ScreenProcess_
@@ -2674,6 +3144,40 @@ _SetUpServicesStart_()
 	echo -e "$cm"
 }
 
+#-------------------------------------#
+# Added by Martinski W. [2026-Jul-30] #
+#-------------------------------------#
+_CheckInstallationRequirements_()
+{
+	local reqsCheckOK=true
+
+	# Check run location #
+	if [ "$(dirname "$scriptFLink")" != "$SCRIPTS_DIR" ]
+	then
+		reqsCheckOK=false
+		printf "\n${ERRORct}**ERROR**: This script must be run from ${GREENct}${SCRIPTS_DIR}${CLEARct}\n"
+	fi
+
+	if [ ! -d "$ADDONS_DIR" ] || \
+	   ! nvram get rc_support | grep -qF 'am_addons'
+	then
+		reqsCheckOK=false
+		printf "\n${ERRORct}**ERROR**: This script is designed for Asuswrt-Merlin firmware only${CLEARct}\n"
+	fi
+
+	if "$reqsCheckOK" && [ "$(nvram get jffs2_scripts)" -ne 1 ]
+	then
+		nvram set jffs2_scripts=1 ; nvram commit
+		_LogMsg_ "Custom JFFS scripts NVRAM setting was enabled" "$pLogWARNG"
+	fi
+
+	"$reqsCheckOK" && return 0
+
+	printf "\n${CRITLct}Requirements for $shScriptName not met, please see above for the reason(s)${CLEARct}\n"
+	_PressAnyKey_
+	return 1
+}
+
 #----------------------------------------#
 # Modified by Martinski W. [2026-Jun-08] #
 #----------------------------------------#
@@ -2690,31 +3194,33 @@ then
 		printf "\nInstalling ${shScriptName}...\n"
 	fi
 
-	# Check run location #
-	if [ "$(dirname "$scriptFLink")" != "$SCRIPTS_DIR" ]
-	then
-		printf "**ERROR**: This script must be run from ${SCRIPTS_DIR}\n"
-		exit 1
+	if ! _CheckInstallationRequirements_
+	then exit 1
 	fi
+
+	mkdir -p "$INSTALL_DIR"
 	chmod 755 "$shScriptFile"
 	echo
 
-	if [ -x /opt/bin/opkg ] && [ -x /opt/sbin/screen ]
-	then action="use"
-	else action="install"
-	fi
-
-	if [ $# -lt 2 ] || [ -z "$2" ] || [ "$2" = "-menu" ]
-	then
-		printf "\nYou have the option to install/use the Entware 'screen' utility.\n"
-		printf "It will replace the built-in background process used by the script.\n"
-		if PromptYN "Would you like to $action the optional Entware 'screen' utility? (y/n):"
-		then useEntwareScreen=true
-		else useEntwareScreen=false
-		fi
-    else
-		useEntwareScreen="$(_GetConfigOption_ USE_EW_SCREEN false)"
-    fi
+	#-------------------------------------------#
+	# Phasing out screen, Remove install prompt #
+	#-------------------------------------------#
+	##OFF## if [ -x /opt/bin/opkg ] && [ -x /opt/sbin/screen ]
+	##OFF## then action="use"
+	##OFF## else action="install"
+	##OFF## fi
+	##OFF##
+	##OFF## if [ $# -lt 2 ] || [ -z "$2" ] || [ "$2" = "-menu" ]
+	##OFF## then
+	##OFF##     printf "\nYou have the option to install/use the Entware 'screen' utility.\n"
+	##OFF##     printf "It will replace the built-in background process used by the script.\n"
+	##OFF##     if PromptYN "Would you like to $action the optional Entware 'screen' utility? (y/n):"
+	##OFF##     then useEntwareScreen=true
+	##OFF##     else useEntwareScreen=false
+	##OFF##     fi
+	##OFF## else
+	##OFF##     useEntwareScreen="$(_GetConfigOption_ USE_EW_SCREEN false)"
+	##OFF## fi
 
 	if "$useEntwareScreen"
 	then
@@ -2723,19 +3229,9 @@ then
 		else useEntwareScreen=false
 		fi
 	fi
-
-	# Set up config file #
-	echo -ne "\tChecking configuration file..."
-	if [ ! -d "$ADDONS_DIR" ]
-	then
-		printf "\n**ERROR**: This script is designed for Asuswrt-Merlin firmware only\n"
-		exit 1
-	fi
-	mkdir -p "$INSTALL_DIR"
-	echo -e "$cm"
-
 	_SetConfigOption_ USE_EW_SCREEN "$useEntwareScreen"
 
+	# Set up configuration file #
 	if [ ! -s "$configFPath" ]
 	then
 		echo -ne "\tCreating configuration file..."
@@ -2761,7 +3257,6 @@ then
 44449,44410 br0 /jffs/scripts/doubleKnock.sh
 
 EOF
-
 		echo -e "$cm"
 
 		if [ $# -lt 2 ] || [ -z "$2" ]
@@ -2780,6 +3275,9 @@ EOF
 				rm -f "$savedConfig"
 			fi
 		fi
+	else
+		echo -ne "\tFound configuration file..."
+		echo -e "$cm"
 	fi
 	chmod 644 "$configFPath"
 
@@ -2817,7 +3315,7 @@ EOF
 	then
 		printf "\nKnock.sh version $REV successfully installed!\n\n"
 
-		if PromptYN "Would you like to edit the config file now ($configFPath)? (y/n):"
+		if PromptYN "Would you like to edit the config file now [$configFPath]? (y/n):"
 		then
 			echo
 			$shScriptFile -edit -nobanner
@@ -2903,6 +3401,8 @@ then
 	rm -f "$configFPath"
 	rm -f "$optConfFile"
 	rm -f "$shScriptFile"
+	rm -f "$logKnockFPath"
+	rm -f "$dmesgKnockLogFILE"
 
 	#Attempt to remove installation directory#
 	if [ "$(pwd)" = "$INSTALL_DIR" ]
@@ -2916,25 +3416,37 @@ then
 	_RemoveCustomFirewallRules_ ALL
 	service restart_firewall >/dev/null
 
-	echo
-	echo "Knock.sh is uninstalled"
+	printf "\nKnock.sh is uninstalled\n"
 	[ -s "$savedConfig" ] && \
 	echo "Existing configuration file saved as $savedConfig"
 	echo "Thanks for using ${shScriptName}!"
 	exit 0
 fi
 
+#Make install of 'develop' version easier#
 if [ "$1" = "-develop" ]
 then
+	if [ -d "$INSTALL_DIR" ]
+	then
+		touch "$developFlag"
+		UpdateScript -force
+		exit 0
+	fi
+
+	if ! _CheckInstallationRequirements_
+	then exit 1
+	fi
+
+	mkdir -p "$INSTALL_DIR"
 	touch "$developFlag"
-	UpdateScript -force
+	chmod 755 "$shScriptFile"
+	exec "$shScriptFile"
 	exit 0
 fi
 
 if [ "$1" = "-main" ] || [ "$1" = "-stable" ]
 then
 	rm -f "$developFlag" 2>/dev/null
-
 	UpdateScript -force
 	exit 0
 fi
@@ -2987,6 +3499,23 @@ then
 	exit
 fi
 
+#-------------------------------------#
+# Added by Martinski W. [2026-Aug-06] #
+#-------------------------------------#
+if [ "$1" = "-dmesgLog" ]
+then
+	if [ $# -lt 2 ] || [ -z "$2" ] || \
+	   ! echo "$2" | grep -qE '^[0-9]+$'
+	then
+		logMsg="**ERROR**: No parameter for 'dmesgLog' process"
+		_LogMsg_ "$logMsg" "$pLogERROR" ; _LogKnock_ "$logMsg"
+		exit 1
+	fi
+	trap '' HUP
+	_Read_dmesgToKnockLogFile_ "$2"
+	exit "$?"
+fi
+
 if [ "$1" != "-loop" ]
 then
 	echo "Knock.sh: Router Commands for non-admin users"
@@ -3027,13 +3556,13 @@ then
 fi
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-May-31] #
+# Modified by Martinski W. [2026-Aug-06] #
 #----------------------------------------#
 Read_dmesgDATA()
 {
 	local IFACE  SRCIP  MSGID  DPORT  PROTO  knockMSG  tempMSG
 
-	knockMSG="$(dmesg | grep -E "^${shScriptName}[[:blank:]]+" | tail -n1)"
+	knockMSG="$(grep -E "^${shScriptName}[[:blank:]]+" "$dmesgKnockLogFILE" | tail -n1)"
 	if [ -z "$knockMSG" ] ; then echo ; return 1 ; fi
 	tempMSG="$(echo "$knockMSG" | awk -v RS=' ' '{print}')"
 
@@ -3076,18 +3605,19 @@ Read_dmesgID()
 #-------------------------------------#
 _WaitAndCheckForSemaphore_()
 {
-    if [ $# -eq 0 ] || [ -z "$1" ] || \
-       ! echo "$1" | grep -qE "^[1-9][0-9]?$"
-    then return 1
-    fi
     local retCode=1  sleepSECS
-    local sleepSecsNUM=0  sleepSecsMAX="$1"
+    local sleepSecsNUM=0  sleepSecsMAX=2
+
+    if [ $# -gt 0 ] && [ -n "$1" ] && \
+       echo "$1" | grep -qE "^[1-9][0-9]?$"
+    then sleepSecsMAX="$1"
+    fi
 
     while [ "$sleepSecsNUM" -lt "$sleepSecsMAX" ]
     do
         if [ "$sleepSecsNUM" -eq 0 ]
-        then sleepSECS=1
-        else sleepSECS=2
+        then sleepSECS=2
+        else sleepSECS="$((sleepSecsMAX - 2))"
         fi
         sleep "$sleepSECS"
         if [ -f "$knockLoopDaemonSEM" ]
@@ -3114,33 +3644,46 @@ if ! "$useEntwareScreen"
 then trap '' HUP
 fi
 
-renice 5 $$
 rm -f "$knockLoopDaemonSEM"
+
+if [ ! -f "$dmesgKnockLogFILE" ]
+then printf '' > "$dmesgKnockLogFILE"
+fi
+
+nohup "$shScriptFile" -dmesgLog "$$" >/dev/null &
+sleep 1  #Give some time for 2nd daemon to start#
 
 isDEBUG=false
 portNumOK=false
 thePortNum=""
 srceIPaddr=""
-sleepINTERVAL=3
 portListCount=0
+sleepINTERVAL=3
 
 knockWaitNUM=0
 knockWaitMAX=60
 prevKnockSIG="N/A"
 nextKnockSIG="N/A"
 
-msgDATA=""
 nextID="N/A"
+msgDATA=""
 
 Read_dmesgDATA
 prevID="$(Read_dmesgID checkID)"
 
 echo "Knock.sh started"
 echo "Version $REV"
-_LogMsg_ "Waiting for port knocks..." "$pLogWARNG"
+
+# For Debug Logging of Port Knocks #
+logKnockEnabled="$(_GetConfigOption_ LOG_KNOCK_ENABLE false)"
+
+logMsg="Waiting for port knocks ${versionStr_TAG}..."
+_LogMsg_ "$logMsg" "$pLogWARNG" ; _LogKnock_ "$logMsg"
+
+renice 10 $$
 
 #----------------------------------------#
-# Modified by Martinski W. [2026-Jun-07] #
+# Modified by Martinski W. [2026-Jul-30] #
 #----------------------------------------#
 while true
 do
@@ -3160,9 +3703,12 @@ do
     # But allow/accept a different Port Knock after ~8 secs.
     # This allows for faster handling of Multi-Port Knocks.
     #---------------------------------------------------------#
-    if { [ -z "$nextID" ] || [ "$prevID" = "$nextID" ] ; } || \
+    if [ -z "$nextID" ] || \
+       { [ "$nextID" -ne 0 ] && [ "$prevID" = "$nextID" ]
+       } || \
        { [ "$prevKnockSIG" = "$nextKnockSIG" ] && \
-         [ "$knockWaitNUM" -lt "$knockWaitMAX" ] ; }
+         [ "$knockWaitNUM" -lt "$knockWaitMAX" ]
+       }
     then continue
     fi
 
@@ -3171,7 +3717,9 @@ do
     kIFACE="$(echo "$msgDATA" | awk -F' ' '{print $3}' | awk -F '=' '{print $2}')"
     kSRCIP="$(echo "$msgDATA" | awk -F' ' '{print $4}' | awk -F '=' '{print $2}')"
     kPROTO="$(echo "$msgDATA" | awk -F' ' '{print $5}' | awk -F '=' '{print $2}')"
-    _LogMsg_ "Knock detected on interface [$kIFACE] into port [${kPORTx}:${kPROTO}] with ID=[$nextID] from SRC=[$kSRCIP]"
+
+    logMsg="Knock detected on interface [$kIFACE] into port [${kPORTx}:${kPROTO}] with ID=[$nextID] from SRC=[$kSRCIP]"
+    _LogMsg_ "$logMsg" "$pLogWARNG" ; _LogKnock_ "$logMsg"
 
     exitConfigLoop=false
     while read -r cfgLINE
@@ -3185,7 +3733,8 @@ do
         theIFACE="$(echo "$cfgLINE" | awk -F' ' '{print $2}')"
         theCMDx="$(echo "$cfgLINE" | awk -F' ' '{match($0, $3); print substr($0, RSTART)}')"
 
-        if [ -z "$thePORTx" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ]
+        if [ -z "$thePORTx" ] || [ -z "$theIFACE" ] || [ -z "$theCMDx" ] || \
+           echo "$theCMDx" | grep -qE "^[[:blank:]]*[#].*"
         then continue  #INVALID#
         fi
 
@@ -3221,13 +3770,15 @@ do
         if [ "$portListCount" -gt "$MULTI_PORT_KNOCK_MAX" ]
         then
             portNumOK=false
-            _LogMsg_ "**ERROR**: INVALID number of ports [$thePORTx] found" "$pLogERROR" NOLOG
+            logMsg="**ERROR**: INVALID number of ports [$thePORTx] found"
+            _LogMsg_ "$logMsg" "$pLogERROR" NOLOG ; _LogKnock_ "$logMsg"
         fi
 
         if [ "$portNumOK" = "false" ] || \
            [ "$activeIFaceOK" = "false" ]
         then
-            _LogMsg_ "*WARNING*: The port knock entry [$cfgLINE] will be ignored" "$pLogWARNG" NOLOG
+            logMsg="*WARNING*: The port knock entry [$cfgLINE] will be ignored"
+            _LogMsg_ "$logMsg" "$pLogWARNG" NOLOG ; _LogKnock_ "$logMsg"
             echo
             continue
         fi
@@ -3279,10 +3830,12 @@ do
                     if [ -n "$prevPortNum" ] && \
                        _CheckKnockWaitTimer_ "$prevPortNum"
                     then
-                        _LogMsg_ "Port [${prevPortNum//_/:}] timer running"
+                        logMsg="Port [${prevPortNum//_/:}] timer running"
+                        _LogMsg_ "$logMsg" ; _LogKnock_ "$logMsg"
                         _StopKnockWaitTimer_ "$prevPortNum"
                     fi
-                    _LogMsg_ "Starting port [${thisPortNum//_/:}] timer"
+                    logMsg="Starting port [${thisPortNum//_/:}] timer"
+                    _LogMsg_ "$logMsg" ; _LogKnock_ "$logMsg"
                     _StartKnockWaitTimer_ "$thisPortNum" "$MULTI_PORT_KNOCK_WAIT"
                     exitConfigLoop=true
                     break  #Get Next Port in the sequence#
@@ -3292,7 +3845,8 @@ do
                    [ -n "$prevPortNum" ] && \
                    _CheckKnockWaitTimer_ "$prevPortNum"
                 then
-                    _LogMsg_ "Port [${prevPortNum//_/:}] timer running"
+                    logMsg="Port [${prevPortNum//_/:}] timer running"
+                    _LogMsg_ "$logMsg" ; _LogKnock_ "$logMsg"
                     _StopKnockWaitTimer_ "$prevPortNum"
                     thePortNum="$thisPortNum"
                     break  #Got Complete Port Sequence#
@@ -3304,13 +3858,14 @@ do
 
         if [ -n "$thePortNum" ] && [ "${kPORTx}_${kPROTO}" = "$thePortNum" ]
         then
-            thePortNum="" ; srceIPaddr=""
-            _LogMsg_ "Executing [ID=$nextID] CMD: [$theCMDx $thePORTx]" "$pLogWARNG"
-            # If calling a script pass the port knock sequence #
-            if ! echo "$theCMDx" | grep -qE "($SCRIPTS_DIR|$INSTALL_DIR)/"
+            logMsg="Executing CMD=[$theCMDx] PORT=[$thePORTx] IF=[$kIFACE] SRC=[$kSRCIP]"
+            _LogMsg_ "$logMsg" "$pLogWARNG" ; _LogKnock_ "$logMsg"
+            # If calling a script pass relevant port knock info #
+            if ! echo "$theCMDx" | grep -qE "($SCRIPTS_DIR|$INSTALL_DIR)/.+"
             then eval $theCMDx &
-            else eval $theCMDx "$thePORTx" &
+            else eval $theCMDx "$kIFACE" "$kSRCIP" "$thePORTx" &
             fi
+            thePortNum="" ; srceIPaddr=""
             break  #Get Next Port Knock#
         fi
     done < "$configFPath"
@@ -3322,7 +3877,15 @@ do
 
     # Get retry entry #
     Read_dmesgDATA
-    prevID="$(Read_dmesgID checkID)"
+    prevID="$(Read_dmesgID)"
+
+    if [ "$prevKnockSIG" != "$nextKnockSIG" ]
+    then  #Reset for new port knock#
+        prevID="$nextID"
+        nextKnockSIG="$prevKnockSIG"
+    else
+        prevID="$(Read_dmesgID checkID)"
+    fi
 done
 
 renice 0 $$
