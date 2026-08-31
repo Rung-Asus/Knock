@@ -76,7 +76,30 @@ Example:
 
 Note that each Port Knock rule is expected to use unique port numbers; otherwise, rules containing duplicate ports are considered invalid. However, using the same port number with a **different** protocol tag would **not** be considered a duplicate. For instance, ports '**50123:UDP**' and '**50123:TCP**' are treated as different ports.
 
-When sending a Multi-Port Knock sequence, each successive knock in the combination must be separated from the previous knock by at least 8 seconds, but no more than 22 seconds.
+When sending a Multi-Port Knock sequence, each successive knock in the combination must be separated from the previous knock by at least **8** seconds, but no more than **22** seconds.
+
+
+## Additional Arguments in the Port Knock Command Execution
+
+For any script located in the **/jffs/scripts/** directory that gets executed via the command field of a port knock configuration line, **three** additional arguments are passed:
+
+1) The source Interface ID
+2) The source IPv4 address
+3) The sequence of port numbers that triggered the command execution
+
+For example, if a shell script is configured to be called as follows:
+
+```sh
+/jffs/scripts/PortKnockActions.sh ARG1 ARG2 ... ARGn
+```
+
+The Knock script will add the **three** additional arguments:
+
+```sh
+/jffs/scripts/PortKnockActions.sh ARG1 ARG2 ... ARGn "$kIFACE" "$kSRCIP" "$thePORTx"
+```
+
+Users are free to completely ignore those additional arguments or use them as they see fit for their specific needs.
 
 
 ## Entware is **not** required
