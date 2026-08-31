@@ -76,7 +76,7 @@ Example:
 
 Note that each Port Knock rule is expected to use unique port numbers; otherwise, rules containing duplicate ports are considered invalid. However, using the same port number with a **different** protocol tag would **not** be considered a duplicate. For instance, ports '**50123:UDP**' and '**50123:TCP**' are treated as different ports.
 
-When sending a Multi-Port Knock sequence, each successive knock in the combination must be separated from the previous knock by at least 8 seconds, but no more than 22 seconds.
+When sending a Multi-Port Knock sequence, each successive knock in the combination must be separated from the previous knock by at least **8** seconds, but no more than **22** seconds.
 
 
 ## Additional Arguments in the Port Knock Command Execution
