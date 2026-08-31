@@ -85,18 +85,18 @@ For any script located in the **/jffs/scripts/** directory that gets executed vi
 
 1) The source Interface ID
 2) The source IPv4 address
-3) The sequence of port numbers that triggered the shell execution
+3) The sequence of port numbers that triggered the command execution
 
 For example, if a shell script is configured to be called as follows:
 
 ```sh
-/jffs/scripts/PortKnockCmdHandler.sh ARG1 ARG2 ... ARGn
+/jffs/scripts/PortKnockActions.sh ARG1 ARG2 ... ARGn
 ```
 
 The Knock script will add the **three** additional arguments:
 
 ```sh
-/jffs/scripts/PortKnockCmdHandler.sh ARG1 ARG2 ... ARGn "$kIFACE" "$kSRCIP" "$thePORTx"
+/jffs/scripts/PortKnockActions.sh ARG1 ARG2 ... ARGn "$kIFACE" "$kSRCIP" "$thePORTx"
 ```
 
 Users are free to completely ignore those additional arguments or use them as they see fit for their specific needs.
