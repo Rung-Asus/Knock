@@ -79,6 +79,29 @@ Note that each Port Knock rule is expected to use unique port numbers; otherwise
 When sending a Multi-Port Knock sequence, each successive knock in the combination must be separated from the previous knock by at least 8 seconds, but no more than 22 seconds.
 
 
+## Additional Arguments in the Port Knock Command Execution
+
+For any script located in the **/jffs/scripts/** directory that gets executed via the command field of a port knock configuration line, **three** additional arguments are passed:
+
+1) The source Interface ID
+2) The source IPv4 address
+3) The sequence of port numbers that triggered the shell execution
+
+For example, if a shell script is configured to be called as follows:
+
+```sh
+/jffs/scripts/PortKnockCmdHandler.sh ARG1 ARG2 ... ARGn
+```
+
+The Knock script will add the **three** additional arguments:
+
+```sh
+/jffs/scripts/PortKnockCmdHandler.sh ARG1 ARG2 ... ARGn "$kIFACE" "$kSRCIP" "$thePORTx"
+```
+
+Users are free to completely ignore those additional arguments or use them as they see fit for their specific needs.
+
+
 ## Entware is **not** required
 
 The script no longer requires Entware to be installed. Installing and using the Entware 'screen' utility is now completely optional. Instead, the script creates a built-in background process running as a daemon.
