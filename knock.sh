@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Oct-12
+# Last Updated: 2026-Nov-13
 ########################################################################
 
 #Update Log:
@@ -94,12 +94,14 @@
 # 3.2.0
 # - New "Email Notifications" feature.
 # - Removed support for Entware 'screen' utility.
+# 3.3.0
+# - Adding cryptographic signature verificaiton to knock.sh updates
 #-----------------------------------------------------------------------#
 set -u
 
-readonly version=3.2.0
+readonly version=3.3.0
 readonly REV="$version"
-readonly VERS_TAG="Stable_26101220"
+readonly VERS_TAG="Beta_26111317"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -177,6 +179,13 @@ readonly firewallStart="${SCRIPTS_DIR}/firewall-start"
 readonly servicesStart="${SCRIPTS_DIR}/services-start"
 readonly developFlag="${INSTALL_DIR}/develop"
 readonly cm="\xE2\x9C\x94"
+
+#Added for signature verification
+readonly shScriptFileUnverified="${TEMP_DIR}/$shScriptName"
+readonly publickey1="${TEMP_DIR}/pubknock1.pem"
+readonly publickey2="${TEMP_DIR}/pubknock2.pem"
+readonly signblock="-----BEGIN SIGNATURE-----"
+
 
 # For Debug Logging of Port Knocks #
 logKnockEnabled=false
@@ -1346,6 +1355,122 @@ CheckFirewall()
 	return 1
 }
 
+_VerifySignature_()
+{
+#Verify signature embedded in file sent as parameter with either of two known public keys
+
+#Export public keys
+cat <<EOF > $publickey1
+-----BEGIN PUBLIC KEY-----
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAzPSyYvz9gHG1VND2E1o7
+uAsM77V1KobSG+Nq8hwinfO99vmho6PUW/lkCP75Ia3gF0L/dW53vuJgKN/X/IH6
+7wyjEzV5ua+H9AbBznDSO7Fg3kZQh2Pe87RBRmL6FA25mwqw9wQU4NPAjqx+1n7h
+LDUBqfRkrPsKLzmysf66KT9tyuXkqJPRuRtsjasXeD+by1sIZJNc0VFVxcsJXXRW
+IV3ktEOxNfs+j2Dn9c8UasPZw6pXFWDgc60JAe+8H97W/fuje+Ex2vboeiVp+mtR
+bJKcStLEsGWa+JH7Z9Ik7DodK45/S1G8oKcrxd4e5QV0fWGGCfuDUt6dTKx47RDJ
+93oUV1AttnraJUw91sOTbvLlJCGC58VqDrLdfp/8mpxsBjrk4933ud5uVNHDMv/7
+YZodHeXNOzjYNJ/t2VJBOhCH0frLRUf4zEZYxb3LWjfuA7haEgkr70LFE8JfFZ0Q
+pDyobkYHaeiNxsZi4q1skC62txPszB4Z2k36xQP77N5rNdlTewvQIuBOWRO/MB1x
+mmYkHJhe2ygyDBoEoftuBUK5WuIsWp9aMecX1Cszrgx4oSgSEYtdRriA18aXHFj0
+//D4dpD/4kSDZnBHnxXiBCwVhp0I5z58KwYW5J95tnffIwI4PteqGDGJS2mgA66b
+nutcMLSE3AAnkD1/PCQzjusCAwEAAQ==
+-----END PUBLIC KEY-----
+EOF
+cat <<EOF > $publickey2
+-----BEGIN PUBLIC KEY-----
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAo4OfRa7EGKoSCznkubqE
+aJgX62/op+jp6K3hV5V0zYXUzwdNj8fE+6cWVCC6hmFraqJF0AN9qPMEzEWM2gY0
+8SJu9k8Il/3k51rlYNF6YMcbiNJc8es2go244WudWQdtuwteVNkEeyTxixYH3KRI
+7Vc929GT8qwYqlpgQVv8L+Hk2PcmTa5Q+dB9RaJlWVCVm4pcmC5D8txPWCbtvH1B
+SiASeuvcZCU505ajxz+g5f5WM3f31klV/qZvbU3q7wsRMJ0wUdUXLQqNPSRmwIhw
+hfuq+wuZUxq/sKr4XLasQteW7s2qA7ULLRYnicNxF8boUpnYjkX0PYNLT6PKJaS9
+0xj9CC8fnmQuTLA39niwUuLHJ4ibIgFpcSIRm4j27ait6YdvhVHu2lVsqmvAC+KR
+nRohDsKAX3pnPmetkeHtO/hKf/gq2AvyCFRTe4P568Samt9ewJpQ4DpeP+WXS1wI
+cz7nBlXmIIOw1Zg7D23DGUBmo+IfdQeScKCz5M9raiwkVkT7z0IfNir71D74JImb
+q4y775dChUgGDbsSepnjl0dXIlFf3p5/E8XgN5LLWROKxGKIvIAQHLDlmXSOFXgf
+pcEz5UDePbA/KIaAgGZlSsPy+i5s76IaGzZUztulNnodE199U6v62Azea2XRvqTr
+nqLS16E8k+YUYUUuUhljU4UCAwEAAQ==
+-----END PUBLIC KEY-----
+EOF
+
+#File to be verified with embedded signature
+local file=$1
+
+local silentARG=""
+
+if [ $# -gt 1 ] && [ -n "$2" ]
+then
+	silentARG="$2"
+fi
+
+if ! [ -f $file ]
+then
+	[ "$silentARG" != "silent" ] && \
+	echo "Error! File $file not found."
+	return 1
+fi
+
+#Temporary files
+local bn=$(basename $1)
+local sigfile="${TEMP_DIR}/$bn.sig"
+local sigfile2="${TEMP_DIR}/$bn.sig2"
+local origfile="${TEMP_DIR}/unsigned_$bn"
+
+#Locate signature block in file
+local line=$(grep -n -F "#$signblock" $file | head -n1 | cut -d: -f1)
+if [ -z $line ]; then
+	[ "$silentARG" != "silent" ] && \
+	echo "Error! Signature block not found."
+	return 1
+fi
+local offset=$(head -n $((line - 1)) $file | wc -c)
+
+#Separate out original file and signing block
+head -c $offset $file > $origfile
+tail -c +$((offset + 1)) $file > $sigfile
+
+#remove comment char # from signing block
+sed -i 's/^#// ' $sigfile
+
+#Protect against fake signing block with unallowed embedded code
+#Re-add comment chars to new signing block
+sed 's/^/#/' $sigfile > $sigfile2
+#Verify original + new signing block equals signed file
+if ! cat $origfile $sigfile2 | cmp -s - $file; then
+	[ "$silentARG" != "silent" ] && \
+	echo "Bad signature block"
+	return 1
+fi
+
+#Convert base64 signature to binary
+openssl base64 -d -in $sigfile -out $sigfile2
+
+#Verify signature of unsigned file with public key 1
+openssl dgst -verify $publickey1 -keyform PEM -sha256 -signature $sigfile2 -binary $origfile >/dev/null 2>&1
+if [ $? -eq 0 ]; then
+	[ "$silentARG" != "silent" ] && \
+	echo "Good signature with key 1"
+else
+	#Verify signature of unsigned file with public key 2
+	openssl dgst -verify $publickey2 -keyform PEM -sha256 -signature $sigfile2 -binary $origfile >/dev/null 2>&1
+	if [ $? -eq 0 ]; then
+		[ "$silentARG" != "silent" ] && \
+		echo "Good signature with key 2"
+	else
+		[ "$silentARG" != "silent" ] && \
+		echo "Verification failed!"
+		return 1
+	fi
+fi
+return 0
+}
+
+SignatureStatus()
+{
+	_VerifySignature_ $0 silent
+	return $?
+}
+
 #----------------------------------------#
 # Modified by Martinski W. [2026-Jun-06] #
 #----------------------------------------#
@@ -1380,6 +1505,13 @@ ShowStatus()
 	else
 		printf "|Firewall Status: ${REDct}MISSING RULE${CLEARct}. RESTART knock!\t|\n"
 	fi
+	printf "${dashes}\n"
+	if SignatureStatus
+	then
+		printf "|  Verify Status: ${GREENct}Valid Signature${CLEARct}\t\t|\n"
+	else
+		printf "|  Verify Status: ${REDct}BAD OR MISSING SIGNATURE!${CLEARct}\t|\n"
+	fi
 	printf "${dashes}\n\n"
 	return
 }
@@ -1393,7 +1525,7 @@ _DownloadFileFromRepo_()
    then return 1
    fi
 
-   local srcFilePathURL="${1}/$2"  
+   local srcFilePathURL="${1}/$2"
    local tempFilePathDL="${TEMP_DIR}/${2}.DL.$$.TMP"
    local theDestFName="$2"  theDestFPath="$3"
    local theMsgStr  logMsgStr  tryDLcount=1
@@ -1486,11 +1618,32 @@ UpdateScript()
 	if [ "$updateType" = "-force" ] || PromptYN "Proceed with update? (y/n):"
 	then
 		printf "\nDownloading...\n"
-		if ! _DownloadFileFromRepo_ "$gitURL_REPO" "$shScriptName" "$shScriptFile"
+#		if ! _DownloadFileFromRepo_ "$gitURL_REPO" "$shScriptName" "$shScriptFile"
+		if ! _DownloadFileFromRepo_ "$gitURL_REPO" "$shScriptName" "$shScriptFileUnverified"
 		then
 			printf "\nThe script ${REDct}${shScriptName}${CLEARct} was NOT updated. Download failed.\n"
 			return 1
 		fi
+
+		#Are we on develop banch (delete check once on stable branch code is signed)
+		if [ -f "$developFlag" ]
+		then
+			if _VerifySignature_ "$shScriptFileUnverified" silent
+			then
+			printf "Verify Status: ${GREENct}Valid Signature${CLEARct}\n"
+			else
+				printf "Verify Status: ${REDct}BAD OR MISSING SIGNATURE!${CLEARct}\n"
+				printf "\nThe script ${REDct}${shScriptName}${CLEARct} was NOT updated. Download failed.\n"
+				return 1
+			fi
+
+		else
+			printf "Verify Status: ${REDct}BYPASSED${CLEARct}\n"
+		fi
+
+		#Verification complete, continue with install
+		cp "$shScriptFileUnverified" "$shScriptFile"
+
 		chmod 755 "$shScriptFile"
 		echo "Installing..."
 		$shScriptFile -install "$updateType"
@@ -4009,11 +4162,33 @@ then
 		printf "\nThe file ${REDct}${versionFName}${CLEARct} failed to download.\n"
 		exit 1
 	fi
-	if ! _DownloadFileFromRepo_ "$gitURL_REPO" "$shScriptName" "$shScriptFile"
+#	if ! _DownloadFileFromRepo_ "$gitURL_REPO" "$shScriptName" "$shScriptFile"
+	if ! _DownloadFileFromRepo_ "$gitURL_REPO" "$shScriptName" "$shScriptFileUnverified"
 	then
 		printf "\nThe script ${REDct}${shScriptName}${CLEARct} was NOT updated. Download failed.\n"
 		exit 1
 	fi
+
+	#Are we on develop banch (delete check once on stable banch code is signed)
+	if [ -f "$developFlag" ]
+	then
+			if _VerifySignature_ "$shScriptFileUnverified" silent
+			then
+			printf "Verify Status: ${GREENct}Valid Signature${CLEARct}\n"
+			else
+				printf "Verify Status: ${REDct}BAD OR MISSING SIGNATURE!${CLEARct}\n"
+				printf "The script ${REDct}${shScriptName}${CLEARct} was NOT updated. Download failed.\n"
+				return 1
+			fi
+			printf "Proceeding with install..."
+	else
+		printf "Verify Status: ${REDct}BYPASSED${CLEARct}\n"
+		printf "Proceeding with install..."
+	fi
+
+	#Verification complete, continue with install
+	cp "$shScriptFileUnverified" "$shScriptFile"
+
 	chmod 755 "$shScriptFile"
 	$shScriptFile -install -force >/dev/null
 	$shScriptFile -start -nobanner >/dev/null
@@ -4061,6 +4236,20 @@ then
 	_Read_dmesgToKnockLogFile_ "$2"
 	exit $?
 fi
+
+if [ "$1" = "-verify" ]
+then
+	if [ $# -lt 2 ] || [ -z "$2" ]
+	then
+		file=$0
+	else
+		file=$2
+	fi
+	echo "Verifying signature of file: $file"
+	_VerifySignature_ $file
+	exit $?
+fi
+
 
 if [ "$1" != "-loop" ]
 then
@@ -4439,3 +4628,17 @@ _ReleaseMutexFLock_
 exit 0
 
 #EOF#
+#Signed Fri Nov 13 17:48:11 UTC 2026
+#-----BEGIN SIGNATURE-----
+#UZ4CQS0lxFSQwRbxWaKnIQH/fTiSjIbNuZx73MWBN0KrrGmuvBU3qLs7D8b0iKIz
+#rC+w02DhRXCp36m0X+zQrenGsq41sPWQFoNXGTiymMPDBeOWX8Ba9SI9J4/0uaS8
+#YPuPpMaKPsbzG75X6/vZCI2zjTOxWm5pNYscn7oIKrDLDcAWFCPulfAMKQnFCd6+
+#SCW/hJ87cdLBnzbi3nrZd1thtWKxGOcB36Zs1ffjIu2pxGfhuHskt+do/Gr1ZveN
+#hytoeOU/9wApOiRTDdRb2XwR2jcsUwNg5ESFErf+nZZCJAxJww9n5+92LLNjT0kS
+#NkXePGGr4PvrJ+oT+L/n+cnzz2cyHlvgW3qUwBNq7RafhmPQ1w20g566z9bgSBG7
+#2h3RNDCmtezPwqgKm6tCnlhk+YDrrLMb/9i5ZSq2RRy/U/fWCZ6BSBNjiqEboLOe
+#Xa/8bgilkmEBZmcVr0EVHkp0vUXuEkumHzsAlsI3sns8aJKyTXojkCACZ7f6vvlb
+#/78j+ipF7ETr1qMQfl2bF2Omvhw1GUIH30U2kaaXh7yipzJAlitM+SuzAwRy7zbw
+#L9gvCbo2qSnEde+wXwEoERbH3gyv+gusdasLj7jf021CSH/GleZTE4p8nMCT1Gp/
+#nj3cGJJk9MTOP6MKUrwR5cR5lb+g5PgJHtnk8T6SV4Q=
+#-----END SIGNATURE-----
