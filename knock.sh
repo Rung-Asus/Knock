@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Nov-13
+# Last Updated: 2026-Nov-15
 ########################################################################
 
 #Update Log:
@@ -101,7 +101,7 @@ set -u
 
 readonly version=3.3.0
 readonly REV="$version"
-readonly VERS_TAG="Beta_26111317"
+readonly VERS_TAG="Beta_26111517"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -4628,17 +4628,17 @@ _ReleaseMutexFLock_
 exit 0
 
 #EOF#
-#Signed Sun Nov 15 17:21:47 UTC 2026
+#Signed Sun Nov 15 17:41:30 UTC 2026
 #-----BEGIN SIGNATURE-----
-#qGsZNnXDWWX8nBwunX+AxcFFPnrD9eeTbvdse1+un0JXe9RZ8l4uyKKEkX4wFAOR
-#9fYsKyqtw3oNBOb1SbiNDoU+jDTlK5fsC/XfBUShQW6gKoVw5IJKB0PL8jReBbnX
-#jecf3k0qgJjGyIde8GkXAQYfS7IsXAOj/CSNIGU0r96EsZCtjR0cxbAhyz9h6OlO
-#Bu+lXkNBZ5kTaEZz+PGJKIXiGGNHbulMeasjvCobvKB7VfimjPGt48fZe+gAq/zi
-#O5sTzAUuyVDxXox6obAcg4WQQJnqBrHXo96PEgAp9S72FIq2b4a6ZsKNyjb+1zR4
-#bl8446KhrDwYvOXorJkDXtd7BHbvQSBEXB6J2i1F919g3l59inRXXClJHOt2Li3J
-#epYl/TVLE0wtogiwtXaJBp2GEjaVbEUIlBhvQzcudJ9oApfAb/JY2tI3M8psxUwM
-#iHC2GOmRpwov4wwqbFrGT0U0weKYXkj07snmzLVRFeMguKtBv970lDqK3B9LwDTQ
-#tKuAD+eBD0K4FlN15I9FNbI/lhpxBY4/fO4n4CwVueHlaCC8Hf+2E7WOtHcRrte7
-#dW89ScieShRgBS4jru8n/sgPU1CFBSdtQhFaVNdROhN1lbu7j+CTBnmPM35FMx0k
-#rl/9Oz+bum3r5/MUbYVS8BQp1/tOTacVe0O89GYAuJo=
+#hszUmowXLqSXMGYWVuGHELxn2TMoEKmXQKMX0RKT7uH2D35VjzeTPzrPpeIyqIJu
+#E8tPNvs0uSnOZXBXvN4luChFWqJnYjabOfZOrKlxZ3/Ais8PT43yCdo0DruPKMww
+#nORrXOzYkbr06wwsQijDGfNO37CPRftwvH9fedjpRlJLLux+uWVtWyLaKcbFvaln
+#xbQSNXwpQzl4BjlFjcJi6KGXyIPKzpI5adloVITydwCpcvgN9WbV2VGa0bykvvn+
+#VgH1InHSdZXSqThOhsWWoAmm71VpFak8S0kUest45nFYWJf28RtIRUh2YHHaRYGu
+#ynkRENXu6iCZuj2Dc3BzHN5nQfOULY1a7ld+gkCkM2O+f/Y0f7HHEoepK+xECo+F
+#ThA4sgDpRS3LARqaLZig8L2t6TadoBgaS0PU1W7vHaoKOHr4YsPW966rm3VSxE3l
+#0hhAZY5h0cuV7YhgNyF1ahmCFAxl4e5X08OhMgsBB/fXii8tY2tYIajmqLl67ABz
+#S/UTg9jVSaBQRc5ZqDZcs7Cud1a2DjFffjSvawFH6Sr5UTFM16WfvqFO/wrN84F2
+#F0uXcHoaRQwuulbgOeH1C4IEg18Z9sRVTHF8K7HNhhoXrG0RkOQKn2HGMjPwmKww
+#geaEL2JenVUcjmXMWdzNSyWsOaVXFPsp846r93B41nI=
 #-----END SIGNATURE-----
