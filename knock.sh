@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Oct-12
+# Last Updated: 2026-Nov-18
 ########################################################################
 
 #Update Log:
@@ -94,12 +94,13 @@
 # 3.2.0
 # - New "Email Notifications" feature.
 # - Removed support for Entware 'screen' utility.
+# 3.2.1
+# - Fixed missing file error
 #-----------------------------------------------------------------------#
 set -u
-
-readonly version=3.2.0
+readonly version=3.2.1
 readonly REV="$version"
-readonly VERS_TAG="Stable_26101220"
+readonly VERS_TAG="Stable_26111815"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -2910,7 +2911,9 @@ logKnockEnabled="$(_GetConfigOption_ LOG_KNOCK_ENABLE false)"
 # The Entware 'screen' utility is NO LONGER SUPPORTED.
 # Remove the var setting from the configuration file.
 #------------------------------------------------------#
-if grep -qE '^USE_EW_SCREEN=.*' "$optConfFile"
+
+#Fix for missing file 18NOV2026
+if [ -f "$optConfFile" ] && grep -qE '^USE_EW_SCREEN=.*' "$optConfFile"
 then sed -i '/^USE_EW_SCREEN=.*/d' "$optConfFile"
 fi
 
