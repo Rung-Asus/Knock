@@ -98,12 +98,14 @@
 # - Adding cryptographic signature verificaiton to knock.sh updates
 # 3.3.1
 # - Fixed missing file error
+# 3.3.2
+# - Add option to delete script when declining install
 #-----------------------------------------------------------------------#
 set -u
 
-readonly version=3.3.1
+readonly version=3.3.2
 readonly REV="$version"
-readonly VERS_TAG="Beta_26111815"
+readonly VERS_TAG="Beta_26111818"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -3908,6 +3910,10 @@ then
 		banner
 		if ! PromptYN "Proceed with installing ${shScriptName}? (y/n):"
 		then
+			if PromptYN "Proceed with deleting file ${shScriptName}? (y/n):"
+			then
+				rm -f "$shScriptFile"
+			fi
 			printf "\nThanks for trying ${shScriptName}!\n"
 			exit 0
 		fi
@@ -4632,17 +4638,17 @@ _ReleaseMutexFLock_
 exit 0
 
 #EOF#
-#Signed Wed Nov 18 14:54:13 UTC 2026
+#Signed Wed Nov 18 18:51:43 UTC 2026
 #-----BEGIN SIGNATURE-----
-#b3qm7WZ9bUa4PEj2fY7wsEQ5Kyu9FzoCJwOGJ5ojqcIdQsYH1SAGcE5Jj53Cug/9
-#2ZOEzKRAfPB7Oc7imClvxeko420wdcuZ2amEgg5d96Sbdzbwk1MadG4qNdDn2xb5
-#2g9+jXwxNqwvQ+YkOTu2fJjmBxXsBQCxj7vRzWOntjQygKCn8RJK4q3mqFNJlXuX
-#GpSIVJ04JtckM7EU8SXG0+HsJshFnscLM4j07E0mdKL6l9lSlEzP8iJE6zpssqvU
-#EMfXVomSC81n1GbRQ8z6cTMl6cC82HUiavb5ybHnm2/0AoQltRhitVAO2lvDYGoR
-#k4GQu0NIkRKvpL4RNry7/IDFJM6ml4RS2x3q1IPt0vvuBxj7e3VYs1p8F65A/I7V
-#t0u5Pi3CQ9ngk5SAUiAEx+AmapJB9lwLazE/WqMbmV0Ie8od9+dTzEZsz4ydjTA1
-#aDTUUMK/S0Dkl6BUEMrgPxgNmbhfrjRtxun7m2ql4BpVNkAFaOXF/ykm6IdjMJz3
-#ZJcvJwtpZEFOtHbpS7XuSXWe5lk6napVnCQ8HrZGVNHExFfZ1hlxKgGoZMalb9Os
-#WiohUVV2iJBQUGmUERo28Bg9idf7yWZ/Pr0MLMh927LjNdgAD4FJ/ASjfh1kgtmo
-#TgOC+Ad3tYZd/zQ3aL/irEvPAC9P22IVZUOCz3bzJdM=
+#QCqfRriEfoUawQr1QSj9rJdKdXjlELePiAmbh7tm2/5/PWH5sR5A40eE38f6frRE
+#t/+C8sx8M7HBiMaf9/KyKROegi1a/JFWK/cSqVoER4xQ9H5h4rwdxHO3pJWiUZaq
+#VbyzNQxaMrbHtmv3XFM8/DBOSyC9pq0kvKv/yFO82bTTsCsHMRj4Tb6PHu7xs9g2
+#HGTOMMiJ/YpPZt/ooZ8NV6EwE+XCpmpxzpqDPWnNTvkphrOpiVdYH6AzRj5pzQty
+#SSCA444flTJf/kHDe4oIor+oMgJTX3Dq1GkKmBBvewCWdy12Yjn5ir5UrjUqQ1nb
+#L913u8XYzDp3o34dQ7VgB3T8e356yQexE6OfyyLFnHPJnjKACS/IHy+VihW3HW0w
+#EH9W78ciOjFjOl/GIxq7dfq2ec6h3ZjImUvnIip5Lk5IhASoxHXaF5qOOejpBA6g
+#ooLDMp2ZRmuGkyvE1h9bYS18WeC4jtYzXm22XcyNHM2/6QdsCH6y+F2COX2jBdyL
+#Hbp5F9BG2qKxULAAvHT7j0e9uLhGdfI1J+9s2Nx9aL5aAWfbrMgVa0bzvUPQvxNM
+#0GR5Qtcpzi0yc7DrddJGd9Hi76KxzE5em7Ouo2o2p2c+b3Wdo3HVGCfb53yVXIH9
+#Ozwl8AOQGRr2wiOVHTYsckl832HVM3LOpWXh0oaXPNE=
 #-----END SIGNATURE-----
