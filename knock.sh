@@ -100,12 +100,14 @@
 # - Fixed missing file error
 # 3.3.2
 # - Add option to delete script when declining install
+# 3.3.3
+# - Changed signature format to RSA-PSS padding
 #-----------------------------------------------------------------------#
 set -u
 
-readonly version=3.3.2
+readonly version=3.3.3
 readonly REV="$version"
-readonly VERS_TAG="Beta_26111818"
+readonly VERS_TAG="Beta_26111915"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -1449,21 +1451,31 @@ fi
 #Convert base64 signature to binary
 openssl base64 -d -in $sigfile -out $sigfile2
 
-#Verify signature of unsigned file with public key 1
-openssl dgst -verify $publickey1 -keyform PEM -sha256 -signature $sigfile2 -binary $origfile >/dev/null 2>&1
+#Verify signature of unsigned file with public key 1 (PSS Padding)
+openssl dgst -verify $publickey1 -keyform PEM -sha256 -sigopt rsa_padding_mode:pss \
+        -sigopt rsa_pss_saltlen:32 -signature $sigfile2 $origfile >/dev/null 2>&1
 if [ $? -eq 0 ]; then
 	[ "$silentARG" != "silent" ] && \
 	echo "Good signature with key 1"
 else
-	#Verify signature of unsigned file with public key 2
-	openssl dgst -verify $publickey2 -keyform PEM -sha256 -signature $sigfile2 -binary $origfile >/dev/null 2>&1
+        #Verify signature of unsigned file with public key 2 (PSS Padding)
+        openssl dgst -verify $publickey2 -keyform PEM -sha256 -sigopt rsa_padding_mode:pss \
+                -sigopt rsa_pss_saltlen:32 -signature $sigfile2 $origfile >/dev/null 2>&1
 	if [ $? -eq 0 ]; then
 		[ "$silentARG" != "silent" ] && \
 		echo "Good signature with key 2"
 	else
-		[ "$silentARG" != "silent" ] && \
-		echo "Verification failed!"
-		return 1
+		#Add legacy test for version 3.3.3 only. Remmove from folllow on revs.
+                #Verify signature of unsigned file with public key 2 (PKCS#1 v1.5 padding)"
+                openssl dgst -verify $publickey2 -keyform PEM -sha256 -signature $sigfile2 $origfile >/dev/null 2>&1
+		if [ $? -eq 0 ]; then
+			[ "$silentARG" != "silent" ] && \
+                        echo "Good signature with key 2 with legacy PKCS#1 v1.5 padding"
+		else
+			[ "$silentARG" != "silent" ] && \
+			echo "Verification failed!"
+			return 1
+		fi
 	fi
 fi
 return 0
@@ -4638,17 +4650,17 @@ _ReleaseMutexFLock_
 exit 0
 
 #EOF#
-#Signed Wed Nov 18 18:51:43 UTC 2026
+#Signed Thu Nov 19 15:51:55 UTC 2026
 #-----BEGIN SIGNATURE-----
-#QCqfRriEfoUawQr1QSj9rJdKdXjlELePiAmbh7tm2/5/PWH5sR5A40eE38f6frRE
-#t/+C8sx8M7HBiMaf9/KyKROegi1a/JFWK/cSqVoER4xQ9H5h4rwdxHO3pJWiUZaq
-#VbyzNQxaMrbHtmv3XFM8/DBOSyC9pq0kvKv/yFO82bTTsCsHMRj4Tb6PHu7xs9g2
-#HGTOMMiJ/YpPZt/ooZ8NV6EwE+XCpmpxzpqDPWnNTvkphrOpiVdYH6AzRj5pzQty
-#SSCA444flTJf/kHDe4oIor+oMgJTX3Dq1GkKmBBvewCWdy12Yjn5ir5UrjUqQ1nb
-#L913u8XYzDp3o34dQ7VgB3T8e356yQexE6OfyyLFnHPJnjKACS/IHy+VihW3HW0w
-#EH9W78ciOjFjOl/GIxq7dfq2ec6h3ZjImUvnIip5Lk5IhASoxHXaF5qOOejpBA6g
-#ooLDMp2ZRmuGkyvE1h9bYS18WeC4jtYzXm22XcyNHM2/6QdsCH6y+F2COX2jBdyL
-#Hbp5F9BG2qKxULAAvHT7j0e9uLhGdfI1J+9s2Nx9aL5aAWfbrMgVa0bzvUPQvxNM
-#0GR5Qtcpzi0yc7DrddJGd9Hi76KxzE5em7Ouo2o2p2c+b3Wdo3HVGCfb53yVXIH9
-#Ozwl8AOQGRr2wiOVHTYsckl832HVM3LOpWXh0oaXPNE=
+#QSWA9by8ujVOn1lm7LDV5OTdbwBdLeP0Hzb1fyGyCkgHag6seZ6cScggceQQq2Lt
+#Tn/w/RDZ36vmdzlRTqdDbe+E7OyAHxqC043HJ5yhkh0NjAPWSioLAFhbJhlN+ALy
+#wL32qufLuQkn5zxvxuJ+P5WWLJVA1pP5H4LgM9zxI6eVWui+6LoTidRngw1VR/uR
+#rqe1xISCovEZuB9BVDYlZaOPZ80+PP2WRWqT5EJQEMKsUyhDo2o0oGV0vMLh/z1Q
+#45zg1rFnnrnqEytVydLl6UKIQi8JM2thHDsNgEJRy/91PMI9HgOgFsff6SAle4Z+
+#Zra0htdtds3yKc4K0AnWbx+rIIVvEhXHZWb7391HhJs1xNz6oJupzIrvMl9eHCC1
+#xWuQgHCQUKVzrSj/n7+TAUPLFhoTIngTRUl7z21+R4uxcEYjE6d4JYrotfLeZf17
+#DREoJokuReId8nzDQ/RxO/OhMcGH5sr5qpwDfc7eKD7kO31YHsomFR0kvD61uK7Z
+#PIRoZI2x3cIpyOGI3/bZMTS5vr8HCXB+EcE0mPLX1mt2HVfe6h/NFAwOV9/JdqGt
+#LS8TOfhri1h+U7dvpme6GgJ67e2m3oduuOzVM/KucRLIRdRAGQPIBPYbJqa1704y
+#PZT6shMid+QatsF/9rBQDrFnHZyP+EONKQZLLsKdNJg=
 #-----END SIGNATURE-----
