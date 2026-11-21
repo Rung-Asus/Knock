@@ -102,12 +102,14 @@
 # - Add option to delete script when declining install
 # 3.3.3
 # - Changed signature format to RSA-PSS padding
+# 3.3.4
+# - Changed signing algorithm to use EC P-256 keys
 #-----------------------------------------------------------------------#
 set -u
 
-readonly version=3.3.3
+readonly version=3.3.4
 readonly REV="$version"
-readonly VERS_TAG="Beta_26111915"
+readonly VERS_TAG="Beta_26112119"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -1368,18 +1370,8 @@ _VerifySignature_()
 #Export public keys
 cat <<EOF > $publickey1
 -----BEGIN PUBLIC KEY-----
-MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAzPSyYvz9gHG1VND2E1o7
-uAsM77V1KobSG+Nq8hwinfO99vmho6PUW/lkCP75Ia3gF0L/dW53vuJgKN/X/IH6
-7wyjEzV5ua+H9AbBznDSO7Fg3kZQh2Pe87RBRmL6FA25mwqw9wQU4NPAjqx+1n7h
-LDUBqfRkrPsKLzmysf66KT9tyuXkqJPRuRtsjasXeD+by1sIZJNc0VFVxcsJXXRW
-IV3ktEOxNfs+j2Dn9c8UasPZw6pXFWDgc60JAe+8H97W/fuje+Ex2vboeiVp+mtR
-bJKcStLEsGWa+JH7Z9Ik7DodK45/S1G8oKcrxd4e5QV0fWGGCfuDUt6dTKx47RDJ
-93oUV1AttnraJUw91sOTbvLlJCGC58VqDrLdfp/8mpxsBjrk4933ud5uVNHDMv/7
-YZodHeXNOzjYNJ/t2VJBOhCH0frLRUf4zEZYxb3LWjfuA7haEgkr70LFE8JfFZ0Q
-pDyobkYHaeiNxsZi4q1skC62txPszB4Z2k36xQP77N5rNdlTewvQIuBOWRO/MB1x
-mmYkHJhe2ygyDBoEoftuBUK5WuIsWp9aMecX1Cszrgx4oSgSEYtdRriA18aXHFj0
-//D4dpD/4kSDZnBHnxXiBCwVhp0I5z58KwYW5J95tnffIwI4PteqGDGJS2mgA66b
-nutcMLSE3AAnkD1/PCQzjusCAwEAAQ==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAESqXp/4XGeWMLRU74BxvdPnYnTGTb
+z8HG1FRVeNtFCjNZjE/5eIygjnffdwS7Ax2PlpjI2LSx0K9lQrmukEikSQ==
 -----END PUBLIC KEY-----
 EOF
 cat <<EOF > $publickey2
@@ -1451,26 +1443,29 @@ fi
 #Convert base64 signature to binary
 openssl base64 -d -in $sigfile -out $sigfile2
 
-#Verify signature of unsigned file with public key 1 (PSS Padding)
-openssl dgst -verify $publickey1 -keyform PEM -sha256 -sigopt rsa_padding_mode:pss \
-        -sigopt rsa_pss_saltlen:32 -signature $sigfile2 $origfile >/dev/null 2>&1
+#Verify signature of unsigned file with public key 1 (EC P-256)
+#openssl dgst -verify $publickey1 -keyform PEM -sha256 -sigopt rsa_padding_mode:pss \
+#        -sigopt rsa_pss_saltlen:32 -signature $sigfile2 $origfile >/dev/null 2>&1
+openssl dgst -verify $publickey1 -keyform PEM -sha256 -signature $sigfile2 $origfile >/dev/null 2>&1
 if [ $? -eq 0 ]; then
 	[ "$silentARG" != "silent" ] && \
 	echo "Good signature with key 1"
 else
-        #Verify signature of unsigned file with public key 2 (PSS Padding)
-        openssl dgst -verify $publickey2 -keyform PEM -sha256 -sigopt rsa_padding_mode:pss \
-                -sigopt rsa_pss_saltlen:32 -signature $sigfile2 $origfile >/dev/null 2>&1
+        #Verify signature of unsigned file with public key 2 (EC P-256)
+        #openssl dgst -verify $publickey2 -keyform PEM -sha256 -sigopt rsa_padding_mode:pss \
+        #        -sigopt rsa_pss_saltlen:32 -signature $sigfile2 $origfile >/dev/null 2>&1
+        openssl dgst -verify $publickey2 -keyform PEM -sha256 -signature $sigfile2 $origfile >/dev/null 2>&1
 	if [ $? -eq 0 ]; then
 		[ "$silentARG" != "silent" ] && \
 		echo "Good signature with key 2"
 	else
-		#Add legacy test for version 3.3.3 only. Remmove from folllow on revs.
-                #Verify signature of unsigned file with public key 2 (PKCS#1 v1.5 padding)"
-                openssl dgst -verify $publickey2 -keyform PEM -sha256 -signature $sigfile2 $origfile >/dev/null 2>&1
+		#Add legacy test for version 3.3.4 only. Remmove from folllow on revs.
+                #Verify signature of unsigned file with public key 2 (PSS Padding)
+                openssl dgst -verify $publickey2 -keyform PEM -sha256 -sigopt rsa_padding_mode:pss \
+                        -sigopt rsa_pss_saltlen:32 -signature $sigfile2 $origfile >/dev/null 2>&1
 		if [ $? -eq 0 ]; then
 			[ "$silentARG" != "silent" ] && \
-                        echo "Good signature with key 2 with legacy PKCS#1 v1.5 padding"
+                        echo "Good signature with key 2 with legacy RSA w/ PSS padding"
 		else
 			[ "$silentARG" != "silent" ] && \
 			echo "Verification failed!"
@@ -4650,17 +4645,17 @@ _ReleaseMutexFLock_
 exit 0
 
 #EOF#
-#Signed Thu Nov 19 15:51:55 UTC 2026
+#Signed Sat Nov 21 19:31:18 UTC 2026
 #-----BEGIN SIGNATURE-----
-#QSWA9by8ujVOn1lm7LDV5OTdbwBdLeP0Hzb1fyGyCkgHag6seZ6cScggceQQq2Lt
-#Tn/w/RDZ36vmdzlRTqdDbe+E7OyAHxqC043HJ5yhkh0NjAPWSioLAFhbJhlN+ALy
-#wL32qufLuQkn5zxvxuJ+P5WWLJVA1pP5H4LgM9zxI6eVWui+6LoTidRngw1VR/uR
-#rqe1xISCovEZuB9BVDYlZaOPZ80+PP2WRWqT5EJQEMKsUyhDo2o0oGV0vMLh/z1Q
-#45zg1rFnnrnqEytVydLl6UKIQi8JM2thHDsNgEJRy/91PMI9HgOgFsff6SAle4Z+
-#Zra0htdtds3yKc4K0AnWbx+rIIVvEhXHZWb7391HhJs1xNz6oJupzIrvMl9eHCC1
-#xWuQgHCQUKVzrSj/n7+TAUPLFhoTIngTRUl7z21+R4uxcEYjE6d4JYrotfLeZf17
-#DREoJokuReId8nzDQ/RxO/OhMcGH5sr5qpwDfc7eKD7kO31YHsomFR0kvD61uK7Z
-#PIRoZI2x3cIpyOGI3/bZMTS5vr8HCXB+EcE0mPLX1mt2HVfe6h/NFAwOV9/JdqGt
-#LS8TOfhri1h+U7dvpme6GgJ67e2m3oduuOzVM/KucRLIRdRAGQPIBPYbJqa1704y
-#PZT6shMid+QatsF/9rBQDrFnHZyP+EONKQZLLsKdNJg=
+#fc6ZaPZUlV8mgVBZ3GqiqU9U8SN0oSZWgF/eAfk+DScijvSZiWcYLVEbwsrnFpBr
+#o6zNCI/ICnQJVXDsGsP3j8HTQL8EgKvJ9ewipqc6v/YNv1dJH/Jzod2nz2fVGsG1
+#SmLHK5gTx+IcYDotedgGJTc9GR/3KMAzf5zfvsR9+E2AglLnxyjNSPG75EqA+/0T
+#mcPsBEPWc39nhhrdhvBgl4uniFCmJrJcDfZqVGiC4+XKF6nbFlD2F2ZqM07wcv72
+#i9a+OrRG4sMdSP9k+3OLQZq4qtIp+MOPjcznQ2UkX6gvVatkaQ4RdUGNLmQQ7Ryn
+#YCRroJDtbMVkfhNQV6P/RhFGfYJWrC3s1d1e3Fzc1fuMnVIIaZamCo2xZDekO/Vj
+#C2GHzxiN5PadAmW7v7cguhrBsR4Y1B7zcDxI4XqfOYa+AC8F0dFRDGkdBzSL+qNI
+#ifX7R5VAXYSCZbqW2zzcdH7ctsFahlK4RXFINcoTSCunkpzpntu7yrohq4npgAS+
+#RCvG0rp8mYAtMXe9uRWS8bYs0fFUGxmNSy/atMNP0ysCD6P/HGbuWRrRoyu+A4nl
+#hzAVjXtJ4FM7nI6nGIl6IAxGXQiA4MW/mcAHz3hnMuymlNa/wbhqqcwMRsYSJ0Uw
+#J6mGQOaH6jLBZ1rseTBMjDrxFjBDZVExPntz8jV87bc=
 #-----END SIGNATURE-----
