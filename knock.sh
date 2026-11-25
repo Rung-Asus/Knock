@@ -104,12 +104,14 @@
 # - Changed signature format to RSA-PSS padding
 # 3.3.4
 # - Changed signing algorithm to use EC P-256 keys
+# 3.3.5
+# - Removed RSA signatures, added sig verifcation with supplied pub key
 #-----------------------------------------------------------------------#
 set -u
 
-readonly version=3.3.4
+readonly version=3.3.5
 readonly REV="$version"
-readonly VERS_TAG="Beta_26112119"
+readonly VERS_TAG="Beta_26112514"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -1376,18 +1378,8 @@ z8HG1FRVeNtFCjNZjE/5eIygjnffdwS7Ax2PlpjI2LSx0K9lQrmukEikSQ==
 EOF
 cat <<EOF > $publickey2
 -----BEGIN PUBLIC KEY-----
-MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAksTt+rKwlpYfE+jr9QuI
-mne1Y69v81cENTWbmEQ9tLaeNVBhy3eVtPIAa48tOBaZWwi8aqUqfF1fgHIccOKX
-SXGM9t+uUmCbLdb7syMcrGlOczA+K/PJo1LfIbjyLZ25M4eAb1XbP5GgF7xgY43o
-oRlO6digOXlBV0P7AxMlFYhvMN7EjPDjx7/LeIMHcTkOvI+KSsiA1PHyo9kx2+lV
-sa7ich/XWt3TgH1TLWTdvmivX5jB8oMr9wms0rHb6BN5zaAJzSmohO1CTvfbmyXf
-fsR+1Xmh4H1ZoEausI43E5O6Va530BKbfH3I+KdrkbbPpZ7Gtbpcsto4P1N8lJUy
-bvIQW3adXzq1lRZaOwk8BB82QTy5FxD8U2d6dBnTDIp+zcp73vPGTQuOsN5LvLjP
-OU3DSRRVx0/2v2frWX8bn+pFQJcIAK3AzVCgyjxIJid+sfsPn23k2BV47dcAEvFU
-Olph+Gcnfo+Wo13U+cGQqFBdoDVEHYpU6FQsQekWyZt+8r9WjBmNyaWmdp3oUSZ8
-zANTHYO8dR0xMM2KhXdV3emiM3rkSNEMBYrtXgXtFKxopLv2fJfMIyQBT1X3uoCi
-K9qFBRCPeFW+G7oVuMlDi99IG0yne6hRaXepjaQbcCzsohIrZkmpZVOnZaNfiHYu
-HM01xOSdPkXCmylBjpgrJfUCAwEAAQ==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKq/8Z2Pa2fs58u3WZZau2+6lQ5s3
+Jrwt1C81uMYYcS+R7gVctEsKWrHcFiwxQeVyXg8xVyTjh565+ZfCpmwYvA==
 -----END PUBLIC KEY-----
 EOF
 
@@ -1443,34 +1435,34 @@ fi
 #Convert base64 signature to binary
 openssl base64 -d -in $sigfile -out $sigfile2
 
+#Verify signature if a public kay was supplied
+if [ -f "$silentARG" ]; then
+	#Verify signature of unsigned file with supplied public key
+	openssl dgst -verify $silentARG -keyform PEM -sha256 -signature $sigfile2 $origfile >/dev/null 2>&1
+	if [ $? -eq 0 ]; then
+		echo "Good signature with public key $silentARG"
+		return 0
+	else
+		echo "Verification failed with public key $silentARG"
+		return 1
+	fi
+fi
+
 #Verify signature of unsigned file with public key 1 (EC P-256)
-#openssl dgst -verify $publickey1 -keyform PEM -sha256 -sigopt rsa_padding_mode:pss \
-#        -sigopt rsa_pss_saltlen:32 -signature $sigfile2 $origfile >/dev/null 2>&1
 openssl dgst -verify $publickey1 -keyform PEM -sha256 -signature $sigfile2 $origfile >/dev/null 2>&1
 if [ $? -eq 0 ]; then
 	[ "$silentARG" != "silent" ] && \
 	echo "Good signature with key 1"
 else
         #Verify signature of unsigned file with public key 2 (EC P-256)
-        #openssl dgst -verify $publickey2 -keyform PEM -sha256 -sigopt rsa_padding_mode:pss \
-        #        -sigopt rsa_pss_saltlen:32 -signature $sigfile2 $origfile >/dev/null 2>&1
         openssl dgst -verify $publickey2 -keyform PEM -sha256 -signature $sigfile2 $origfile >/dev/null 2>&1
 	if [ $? -eq 0 ]; then
 		[ "$silentARG" != "silent" ] && \
 		echo "Good signature with key 2"
 	else
-		#Add legacy test for version 3.3.4 only. Remmove from folllow on revs.
-                #Verify signature of unsigned file with public key 2 (PSS Padding)
-                openssl dgst -verify $publickey2 -keyform PEM -sha256 -sigopt rsa_padding_mode:pss \
-                        -sigopt rsa_pss_saltlen:32 -signature $sigfile2 $origfile >/dev/null 2>&1
-		if [ $? -eq 0 ]; then
-			[ "$silentARG" != "silent" ] && \
-                        echo "Good signature with key 2 with legacy RSA w/ PSS padding"
-		else
-			[ "$silentARG" != "silent" ] && \
-			echo "Verification failed!"
-			return 1
-		fi
+		[ "$silentARG" != "silent" ] && \
+		echo "Verification failed!"
+		return 1
 	fi
 fi
 return 0
@@ -4011,7 +4003,8 @@ EOF
 		touch "$profileAdd"
 	fi
 	sed -i -e "\\~${shScriptFile}~d" "$profileAdd"
-	echo "alias knock=\"sh $shScriptFile\"  #Added by $shScriptName#" >> "$profileAdd"
+	#Allow parameters
+	echo "alias knock=\"sh $shScriptFile \$@\"  #Added by $shScriptName#" >> "$profileAdd"
 	chmod 644 "$profileAdd"
 	printf "${cm}\n"
 
@@ -4262,8 +4255,16 @@ then
 	else
 		file=$2
 	fi
-	echo "Verifying signature of file: $file"
-	_VerifySignature_ $file
+
+	#See if public key was supplied from command line
+	if [ $# -gt 2 ] && [ -f "$3" ]
+	then
+		echo "Verifying signature of file \"$file\" with public key \"$3\""
+		_VerifySignature_ $file "$3"
+	else
+		echo "Verifying signature of file: $file"
+		_VerifySignature_ $file
+	fi
 	exit $?
 fi
 
@@ -4645,17 +4646,8 @@ _ReleaseMutexFLock_
 exit 0
 
 #EOF#
-#Signed Sat Nov 21 19:31:18 UTC 2026
+#Signed Wed Nov 25 14:19:55 UTC 2026
 #-----BEGIN SIGNATURE-----
-#fc6ZaPZUlV8mgVBZ3GqiqU9U8SN0oSZWgF/eAfk+DScijvSZiWcYLVEbwsrnFpBr
-#o6zNCI/ICnQJVXDsGsP3j8HTQL8EgKvJ9ewipqc6v/YNv1dJH/Jzod2nz2fVGsG1
-#SmLHK5gTx+IcYDotedgGJTc9GR/3KMAzf5zfvsR9+E2AglLnxyjNSPG75EqA+/0T
-#mcPsBEPWc39nhhrdhvBgl4uniFCmJrJcDfZqVGiC4+XKF6nbFlD2F2ZqM07wcv72
-#i9a+OrRG4sMdSP9k+3OLQZq4qtIp+MOPjcznQ2UkX6gvVatkaQ4RdUGNLmQQ7Ryn
-#YCRroJDtbMVkfhNQV6P/RhFGfYJWrC3s1d1e3Fzc1fuMnVIIaZamCo2xZDekO/Vj
-#C2GHzxiN5PadAmW7v7cguhrBsR4Y1B7zcDxI4XqfOYa+AC8F0dFRDGkdBzSL+qNI
-#ifX7R5VAXYSCZbqW2zzcdH7ctsFahlK4RXFINcoTSCunkpzpntu7yrohq4npgAS+
-#RCvG0rp8mYAtMXe9uRWS8bYs0fFUGxmNSy/atMNP0ysCD6P/HGbuWRrRoyu+A4nl
-#hzAVjXtJ4FM7nI6nGIl6IAxGXQiA4MW/mcAHz3hnMuymlNa/wbhqqcwMRsYSJ0Uw
-#J6mGQOaH6jLBZ1rseTBMjDrxFjBDZVExPntz8jV87bc=
+#MEQCID6TGZ1LAJAqOJckKbJWMANPKZBgtc3uys5Vwe0kjQskAiBLd1rZwr5gWbCM
+#wfuuBZYsrQILzYy/GmFFfi9KnAennw==
 #-----END SIGNATURE-----
