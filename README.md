@@ -3,6 +3,8 @@ Knock: Router commands for non-admin users
 
 ## v3.3.5
 ### Updated on 2026-Nov-25
+### Signing key has fingerprint:
+af5c28451bb56dda090029d3109a1216ac8992373961b450e3aa4430afb779c6
 
 ## Installation
 ssh into your router and enter the following command:
