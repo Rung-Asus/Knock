@@ -111,7 +111,7 @@ set -u
 
 readonly version=3.3.5
 readonly REV="$version"
-readonly VERS_TAG="Beta_26112514"
+readonly VERS_TAG="Beta_26112801"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -1407,7 +1407,7 @@ local sigfile2="${TEMP_DIR}/$bn.sig2"
 local origfile="${TEMP_DIR}/unsigned_$bn"
 
 #Locate signature block in file
-local line=$(grep -n -F "#$signblock" $file | head -n1 | cut -d: -f1)
+local line=$(grep -n -F "#$signblock" $file | tail -n1 | cut -d: -f1)
 if [ -z $line ]; then
 	[ "$silentARG" != "silent" ] && \
 	echo "Error! Signature block not found."
@@ -4646,8 +4646,8 @@ _ReleaseMutexFLock_
 exit 0
 
 #EOF#
-#Signed Wed Nov 25 14:19:55 UTC 2026
+#Signed Sat Nov 28 01:45:49 UTC 2026
 #-----BEGIN SIGNATURE-----
-#MEQCID6TGZ1LAJAqOJckKbJWMANPKZBgtc3uys5Vwe0kjQskAiBLd1rZwr5gWbCM
-#wfuuBZYsrQILzYy/GmFFfi9KnAennw==
+#MEUCIQCC2BlNuwz7gctl/ZLmUiOU0n3fKkloDtoEjdJaYY2caQIga+MR+BZk5AGZ
+#ATspKpmrBBIm5HoH50UsULeAwobQzys=
 #-----END SIGNATURE-----
