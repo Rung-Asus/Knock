@@ -44,7 +44,7 @@
 #Developed by Rung and Martinski
 #
 #-----------------------------------------------------------------------
-# Last Updated: 2026-Nov-15
+# Last Updated: 2026-Nov-27
 ########################################################################
 
 #Update Log:
@@ -111,7 +111,7 @@ set -u
 
 readonly version=3.3.5
 readonly REV="$version"
-readonly VERS_TAG="Beta_26112801"
+readonly VERS_TAG="Beta_26112802"
 readonly INTERVAL=5
 readonly MIN_KNOCK_PORT=1024  #Avoid well-known RESERVED ports#
 readonly MULTI_PORT_KNOCK_WAIT=30
@@ -1434,12 +1434,15 @@ fi
 
 #Convert base64 signature to binary
 openssl base64 -d -in $sigfile -out $sigfile2
+rm $sigfile
 
 #Verify signature if a public kay was supplied
 if [ -f "$silentARG" ]; then
 	#Verify signature of unsigned file with supplied public key
 	openssl dgst -verify $silentARG -keyform PEM -sha256 -signature $sigfile2 $origfile >/dev/null 2>&1
 	if [ $? -eq 0 ]; then
+		rm $sigfile2
+		rm $origfile
 		echo "Good signature with public key $silentARG"
 		return 0
 	else
@@ -1465,6 +1468,8 @@ else
 		return 1
 	fi
 fi
+rm $sigfile2
+rm $origfile
 return 0
 }
 
@@ -4646,8 +4651,8 @@ _ReleaseMutexFLock_
 exit 0
 
 #EOF#
-#Signed Sat Nov 28 01:45:49 UTC 2026
+#Signed Sat Nov 28 02:47:36 UTC 2026
 #-----BEGIN SIGNATURE-----
-#MEUCIQCC2BlNuwz7gctl/ZLmUiOU0n3fKkloDtoEjdJaYY2caQIga+MR+BZk5AGZ
-#ATspKpmrBBIm5HoH50UsULeAwobQzys=
+#MEUCIGLbFK5bL4FO595t+vpNeNyH4NhpqHwROgqPy9NdiEtxAiEAlGVvz/4jScIq
+#aLLypD02Z0zt/3C7odP0rvab3LZMceU=
 #-----END SIGNATURE-----
